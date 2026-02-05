@@ -2,6 +2,7 @@ import copy
 from cereal import car, custom
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import mean
+from openpilot.common.swaglog import cloudlog
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from openpilot.selfdrive.car.interfaces import CarStateBase
@@ -32,6 +33,10 @@ class CarState(CarStateBase):
 
     self.single_pedal_mode = False
     self.pedal_steady = 0.
+
+    # SDGM/SASCM debug: track fault transitions
+    self.prev_acc_faulted = False
+    self.is_sdgm_sascm = CP.carFingerprint in SDGM_CAR or bool(CP.flags & GMFlags.SASCM.value)
 
   def update(self, pt_cp, cam_cp, loopback_cp, frogpilot_toggles):
     ret = car.CarState.new_message()
@@ -125,10 +130,25 @@ class CarState(CarStateBase):
     ret.parkingBrake = pt_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
-                      pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
+    cruise_state_raw = pt_cp.vl["AcceleratorPedal2"]["CruiseState"]
+    friction_brake_unavail = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"]
+    ret.accFaulted = (cruise_state_raw == AccState.FAULTED or friction_brake_unavail == 1)
 
-    ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
+    # SDGM/SASCM debug: log on fault rising edge
+    if self.is_sdgm_sascm and ret.accFaulted and not self.prev_acc_faulted:
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: accFaulted=True CruiseState=%d(FAULTED=%d) FrictionBrakeUnavail=%d" %
+                       (cruise_state_raw, AccState.FAULTED, friction_brake_unavail))
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: vEgo=%.2f brakePressed=%s gasPressed=%s steeringTorque=%.1f" %
+                       (ret.vEgoRaw, ret.brakePressed, ret.gasPressed, ret.steeringTorque))
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: lkas_status=%d steerFaultTemp=%s steerFaultPerm=%s" %
+                       (self.lkas_status, ret.steerFaultTemporary, ret.steerFaultPermanent))
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: pt_lka_counter=%d cam_lka_counter=%d buttons_counter=%d" %
+                       (self.pt_lka_steering_cmd_counter, self.cam_lka_steering_cmd_counter, self.buttons_counter))
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: cruiseAvailable=%s cruiseEnabled=%s standstill=%s" %
+                       (ret.cruiseState.available, ret.cruiseState.enabled, ret.cruiseState.standstill))
+    self.prev_acc_faulted = ret.accFaulted
+
+    ret.cruiseState.enabled = cruise_state_raw != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.flags & GMFlags.NO_CAMERA.value:
       if self.CP.carFingerprint not in CC_ONLY_CAR:

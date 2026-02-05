@@ -6,6 +6,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.numpy_fast import interp, clip
 from openpilot.common.realtime import DT_CTRL
 from openpilot.common.params_pyx import Params
+from openpilot.common.swaglog import cloudlog
 from opendbc.can.packer import CANPacker
 from openpilot.selfdrive.car import apply_driver_steer_torque_limits, create_gas_interceptor_command
 from openpilot.selfdrive.car.gm import gmcan
@@ -59,6 +60,10 @@ class CarController(CarControllerBase):
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint]['pt'])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint]['radar'])
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint]['chassis'])
+
+    # SDGM/SASCM debug
+    self.is_sdgm_sascm = CP.carFingerprint in SDGM_CAR or bool(CP.flags & GMFlags.SASCM.value)
+    self.prev_fault_frame = -200  # rate-limit fault logging
 
     # FrogPilot variables
     self.accel_g = 0.0
@@ -258,6 +263,21 @@ class CarController(CarControllerBase):
           send_fcw = hud_alert == VisualAlert.fcw
           can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
                                                               hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
+
+          # SDGM/SASCM debug: log controller state on cruise fault (rate-limited to once per 2s)
+          if self.is_sdgm_sascm and CS.pcm_acc_status == AccState.FAULTED and (self.frame - self.prev_fault_frame) >= 200:
+            self.prev_fault_frame = self.frame
+            cloudlog.warning("GM_SDGM_DEBUG CC_FAULT: apply_gas=%d apply_brake=%d acc_engaged=%s" %
+                             (self.apply_gas, self.apply_brake, acc_engaged))
+            cloudlog.warning("GM_SDGM_DEBUG CC_FAULT: friction_brake_bus=%d CC.enabled=%s CC.longActive=%s" %
+                             (friction_brake_bus, CC.enabled, CC.longActive))
+            cloudlog.warning("GM_SDGM_DEBUG CC_FAULT: at_full_stop=%s near_stop=%s stopping=%s" %
+                             (at_full_stop, near_stop, stopping))
+            cloudlog.warning("GM_SDGM_DEBUG CC_FAULT: pcm_acc_status=%d vEgo=%.2f lka_counter=%d cam_lka_counter=%d" %
+                             (CS.pcm_acc_status, CS.out.vEgo, self.lka_steering_cmd_counter, CS.cam_lka_steering_cmd_counter))
+            cloudlog.warning("GM_SDGM_DEBUG CC_FAULT: steer_out_of_sync=%s loopback_ts=%d" %
+                             (self.lka_steering_cmd_counter % 4 != (CS.cam_lka_steering_cmd_counter + 1) % 4,
+                              CS.loopback_lka_steering_cmd_ts_nanos))
       else:
         # to keep accel steady for logs when not sending gas
         accel += self.accel_g
