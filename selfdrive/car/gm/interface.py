@@ -5,6 +5,7 @@ import numpy as np
 from panda import Panda
 
 from openpilot.common.conversions import Conversions as CV
+from openpilot.common.params import Params
 from openpilot.selfdrive.car import create_button_events, get_safety_config
 from openpilot.selfdrive.car.gm.radar_interface import RADAR_HEADER_MSG
 from openpilot.selfdrive.car.gm.values import CAR, CruiseButtons, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, CanBus, GMFlags, CC_ONLY_CAR, SDGM_CAR, ASCM_INT
@@ -109,13 +110,16 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def _get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs, frogpilot_toggles):
     ret.carName = "gm"
-    ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.noOutput),
-                         get_safety_config(car.CarParams.SafetyModel.gm)]
+    params = Params()
+    if params.get_bool("UseRedPanda"):
+      ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.noOutput),get_safety_config(car.CarParams.SafetyModel.gm)]
+    else:
+      ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
     ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
 
     # Detect Beartech SASCM allows openpilot longitudinal control on SDGM and ASCM_INT vehicles
-    if 0x2FF in fingerprint[0]:
+    if 0x2FF in fingerprint[CanBus.POWERTRAIN]:
       ret.flags |= GMFlags.SASCM.value
 
     if PEDAL_MSG in fingerprint[0]:
