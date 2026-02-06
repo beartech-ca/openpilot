@@ -303,7 +303,14 @@ class CanBus:
 
   @staticmethod
   def checkPanda():
-    if Params().get_bool("UseRedPanda"):
+    use_red_panda = False
+    try:
+      use_red_panda = Params().get_bool("UseRedPanda")
+    except Exception:
+      # Param may not exist yet on first boot or if params not rebuilt
+      pass
+
+    if use_red_panda:
       CanBus.POWERTRAIN = 0 + 4
       CanBus.OBSTACLE = 1 + 4
       CanBus.CAMERA = 2 + 4
