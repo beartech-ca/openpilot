@@ -6,7 +6,6 @@ from panda import Panda
 
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.params import Params
-from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.car import create_button_events, get_safety_config
 from openpilot.selfdrive.car.gm.radar_interface import RADAR_HEADER_MSG
 from openpilot.selfdrive.car.gm.values import CAR, CruiseButtons, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, CanBus, GMFlags, CC_ONLY_CAR, SDGM_CAR, ASCM_INT
@@ -120,7 +119,7 @@ class CarInterface(CarInterfaceBase):
     ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
 
     # Detect Beartech SASCM allows openpilot longitudinal control on SDGM and ASCM_INT vehicles
-    if 0x2FF in fingerprint[CanBus.POWERTRAIN]:
+    if 0x2FF in fingerprint[0]:
       ret.flags |= GMFlags.SASCM.value
 
     if PEDAL_MSG in fingerprint[0]:
@@ -301,6 +300,8 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.2
       if not ret.openpilotLongitudinalControl:
         ret.minEnableSpeed = -1.  # engage speed is decided by pcm
+      else:
+        ret.minEnableSpeed = 20 * CV.KPH_TO_MS  # from the log it looks like 10mph is the minimun 10 * CV.MPH_TO_MS, which is around 16kmh, lets set it to 20 first.
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.CADILLAC_CT6_CC:
@@ -369,37 +370,6 @@ class CarInterface(CarInterfaceBase):
 
     if ACCELERATOR_POS_MSG not in fingerprint[CanBus.POWERTRAIN]:
       ret.flags |= GMFlags.NO_ACCELERATOR_POS_MSG.value
-
-    # SDGM/SASCM debug logging at init
-    is_sdgm = candidate in SDGM_CAR
-    has_sascm = bool(ret.flags & GMFlags.SASCM.value)
-    if is_sdgm or has_sascm:
-      use_red_panda = params.get_bool("UseRedPanda")
-      safety_param = ret.safetyConfigs[-1].safetyParam
-      cloudlog.warning("GM_SDGM_DEBUG init: car=%s is_sdgm=%s has_sascm=%s use_red_panda=%s" %
-                       (candidate, is_sdgm, has_sascm, use_red_panda))
-      cloudlog.warning("GM_SDGM_DEBUG init: safetyConfigs_count=%d safetyParam=0x%04X (%d)" %
-                       (len(ret.safetyConfigs), safety_param, safety_param))
-      cloudlog.warning("GM_SDGM_DEBUG init: flags=0x%04X opLong=%s pcmCruise=%s networkLocation=%s" %
-                       (ret.flags, ret.openpilotLongitudinalControl, ret.pcmCruise, ret.networkLocation))
-      cloudlog.warning("GM_SDGM_DEBUG init: radarUnavailable=%s experimentalLongAvail=%s" %
-                       (ret.radarUnavailable, ret.experimentalLongitudinalAvailable))
-      cloudlog.warning("GM_SDGM_DEBUG init: CanBus PT=%d OBS=%d CAM=%d CHASSIS=%d LOOPBACK=%d" %
-                       (CanBus.POWERTRAIN, CanBus.OBSTACLE, CanBus.CAMERA, CanBus.CHASSIS, CanBus.LOOPBACK))
-      # Decode safety param flags for easy reading
-      flag_names = []
-      if safety_param & Panda.FLAG_GM_HW_CAM: flag_names.append("HW_CAM")
-      if safety_param & Panda.FLAG_GM_HW_CAM_LONG: flag_names.append("HW_CAM_LONG")
-      if safety_param & 4: flag_names.append("CC_LONG")
-      if safety_param & 8: flag_names.append("HW_ASCM_LONG")
-      if safety_param & 16: flag_names.append("NO_CAMERA")
-      if safety_param & 32: flag_names.append("NO_ACC")
-      if safety_param & 64: flag_names.append("PEDAL_LONG")
-      if safety_param & 128: flag_names.append("GAS_INTERCEPTOR")
-      if safety_param & 256: flag_names.append("ASCM_INT")
-      if safety_param & Panda.FLAG_GM_FORCE_BRAKE_C9: flag_names.append("FORCE_BRAKE_C9")
-      if safety_param & Panda.FLAG_GM_HW_SDGM: flag_names.append("HW_SDGM")
-      cloudlog.warning("GM_SDGM_DEBUG init: safetyParam flags=[%s]" % ", ".join(flag_names))
 
     return ret
 
