@@ -111,9 +111,6 @@ class LongitudinalPlanner:
     self.a_desired_trajectory = np.zeros(CONTROL_N)
     self.j_desired_trajectory = np.zeros(CONTROL_N)
     self.solverExecutionTime = 0.0
-    # logging cadence & state
-    self.last_uncert_log_t = 0.0
-    self.prev_uncert_over = False
 
     # ---- Rubberband mitigation state ----
     # Two uncertainty tracks (slow/fast) for asymmetric gating
@@ -138,7 +135,7 @@ class LongitudinalPlanner:
 
   @property
   def mlsim(self):
-      return self.generation in ("v8", "v10", "v11")
+      return self.generation in ("v8", "v10", "v11", "v12")
 
   def get_mpc_mode(self) -> str:
       """
@@ -344,19 +341,6 @@ class LongitudinalPlanner:
 
     # now_t defined earlier
     over = uncertainty > 1.0
-    # Log on threshold edge or at ~1 Hz
-    if over != self.prev_uncert_over or (now_t - self.last_uncert_log_t) > 1.0:
-      try:
-        cloudlog.error(
-          f"LON_UNCERT; v_ego={v_ego:.2f} mps; desireEntropy={desire_entropy:.3f}; "
-          f"brakeRawMax={(raw_brake_max if 'raw_brake_max' in locals() else -1.0):.3f}; "
-          f"brakeDecayed={(disengage_risk if 'disengage_risk' in locals() else -1.0):.3f}; "
-          f"lam={(lam if 'lam' in locals() else -1.0):.2f}; uncertainty={uncertainty:.3f}; over={over}"
-        )
-      except Exception as e:
-        cloudlog.warning(f"LON_UNCERT log error: {e}")
-      self.prev_uncert_over = over
-      self.last_uncert_log_t = now_t
 
     # Asymmetric accel release with hysteresis + dwell to prevent on/off pulsing
     rise_dwell_s, fall_dwell_s = 0.6, 0.4
