@@ -445,7 +445,6 @@ frogpilot_default_params: list[tuple[str, str | bytes, int, str]] = [
   ("VEgoStopping", "", 3, ""),
   ("VEgoStoppingStock", "", 3, ""),
   ("VeryLongDistanceButtonControl", "6", 2, "0"),
-  ("UseRedPanda", "0", 2, "0"),
   ("VoltSNG", "0", 2, "0"),
   ("WarningImmediateVolume", "101", 2, "101"),
   ("WarningSoftVolume", "101", 2, "101"),

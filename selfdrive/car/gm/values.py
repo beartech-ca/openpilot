@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from enum import IntFlag
 
 from cereal import car
-from openpilot.common.params import Params
 from openpilot.common.numpy_fast import interp
 from openpilot.selfdrive.car import dbc_dict, PlatformConfig, DbcDict, Platforms, CarSpecs
 from openpilot.selfdrive.car.docs_definitions import CarHarness, CarDocs, CarParts
@@ -294,38 +293,13 @@ class AccState:
   STANDSTILL = 4
 
 class CanBus:
-  POWERTRAIN = 0
-  OBSTACLE = 1
-  CAMERA = 2
-  CHASSIS = 2
-  LOOPBACK = 128
-  DROPPED = 192
-
-  @staticmethod
-  def checkPanda():
-    use_red_panda = False
-    try:
-      use_red_panda = Params().get_bool("UseRedPanda")
-    except Exception:
-      # Param may not exist yet on first boot or if params not rebuilt
-      pass
-
-    if use_red_panda:
-      CanBus.POWERTRAIN = 0 + 4
-      CanBus.OBSTACLE = 1 + 4
-      CanBus.CAMERA = 2 + 4
-      CanBus.CHASSIS = 2 + 4
-      CanBus.LOOPBACK = 128 + 4
-      CanBus.DROPPED = 192 + 4
-    else:
-      CanBus.POWERTRAIN = 0
-      CanBus.OBSTACLE = 1
-      CanBus.CAMERA = 2
-      CanBus.CHASSIS = 2
-      CanBus.LOOPBACK = 128
-      CanBus.DROPPED = 192
-
-CanBus.checkPanda()
+  # Red Panda always ON: buses offset by +4
+  POWERTRAIN = 4
+  OBSTACLE = 5
+  CAMERA = 6
+  CHASSIS = 6
+  LOOPBACK = 132
+  DROPPED = 196
 
 class GMFlags(IntFlag):
   PEDAL_LONG = 1
