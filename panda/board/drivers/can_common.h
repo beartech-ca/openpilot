@@ -33,7 +33,6 @@ extern bool can_loopback;
 // Ignition detected from CAN meessages
 bool ignition_can = false;
 uint32_t ignition_can_cnt = 0U;
-extern bool gm_remote_start_boots_comma;
 
 #define ALL_CAN_SILENT 0xFF
 #define ALL_CAN_LIVE 0
@@ -201,24 +200,12 @@ void ignition_can_hook(CANPacket_t *to_push) {
   if (bus == 0) {
     int addr = GET_ADDR(to_push);
     int len = GET_LEN(to_push);
-    
+
     // GM exception
-    #ifdef PANDA_GM_REMOTE_START_C9
-    if (true) {
-    #else
-    if (gm_remote_start_boots_comma) {
-    #endif
-      if ((addr == 0xC9) && (len == 8)) {
-        // Matches SystemPowerMode (1=Run, 0=Off)
-        ignition_can = (GET_BYTE(to_push, 6) & 0x10U) != 0U;
-        ignition_can_cnt = 0U;
-      }
-    } else {
-      if ((addr == 0x1F1) && (len == 8)) {
-        // SystemPowerMode (2=Run, 3=Crank Request)
-        ignition_can = (GET_BYTE(to_push, 0) & 0x2U) != 0U;
-        ignition_can_cnt = 0U;
-      }
+    if ((addr == 0xC9) && (len == 8)) {
+      // Matches SystemPowerMode (1=Run, 0=Off)
+      ignition_can = (GET_BYTE(to_push, 6) & 0x10U) != 0U;
+      ignition_can_cnt = 0U;
     }
 
     // Tesla exception
@@ -231,16 +218,6 @@ void ignition_can_hook(CANPacket_t *to_push) {
     // Mazda exception
     if ((addr == 0x9E) && (len == 8)) {
       ignition_can = (GET_BYTE(to_push, 0) >> 5) == 0x6U;
-      ignition_can_cnt = 0U;
-    }
-
-  } else if (bus == 2) {
-    int addr = GET_ADDR(to_push);
-    int len = GET_LEN(to_push);
-    // GM exception, SDGM cars have this message on bus 2
-    if ((addr == 0x1F1) && (len == 8)) {
-      // SystemPowerMode (2=Run, 3=Crank Request)
-      ignition_can = (GET_BYTE(to_push, 0) & 0x2U) != 0U;
       ignition_can_cnt = 0U;
     }
   }

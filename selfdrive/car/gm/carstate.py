@@ -2,10 +2,11 @@ import copy
 from cereal import car, custom
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.numpy_fast import mean
+from openpilot.common.swaglog import cloudlog
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from openpilot.selfdrive.car.interfaces import CarStateBase
-from openpilot.selfdrive.car.gm.values import DBC, AccState, CanBus, STEER_THRESHOLD, GMFlags, CC_ONLY_CAR, CAMERA_ACC_CAR, SDGM_CAR, CC_REGEN_PADDLE_CAR, ASCM_INT, CAR
+from openpilot.selfdrive.car.gm.values import DBC, AccState, CanBus, STEER_THRESHOLD, GMFlags, CC_ONLY_CAR, CAMERA_ACC_CAR, SDGM_CAR, ASCM_INT, CAR
 
 TransmissionType = car.CarParams.TransmissionType
 NetworkLocation = car.CarParams.NetworkLocation
@@ -26,43 +27,26 @@ class CarState(CarStateBase):
     self.pt_lka_steering_cmd_counter = 0
     self.cam_lka_steering_cmd_counter = 0
     self.buttons_counter = 0
-    self.steering_button_checksum = 0
-    self.steering_button_prefix = 0x01
 
     self.prev_distance_button = 0
     self.distance_button = 0
 
     self.single_pedal_mode = False
     self.pedal_steady = 0.
-    self.ecm_cruise_control_ts_nanos = 0
-    self.accelerator_pedal2_ts_nanos = 0
+
+    # SDGM/SASCM debug: track fault transitions
+    self.prev_acc_faulted = False
+    self.is_sdgm_sascm = CP.carFingerprint in SDGM_CAR or bool(CP.flags & GMFlags.SASCM.value)
 
   def update(self, pt_cp, cam_cp, loopback_cp, frogpilot_toggles):
     ret = car.CarState.new_message()
     fp_ret = custom.FrogPilotCarState.new_message()
-    volt_like = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_CC}
-    kaofui_state_cars = volt_like | SDGM_CAR | ASCM_INT | {
-      CAR.CHEVROLET_BLAZER,
-      CAR.CHEVROLET_MALIBU_SDGM,
-      CAR.CHEVROLET_MALIBU_HYBRID_CC,
-    }
-    sdgm_non_volt = self.CP.carFingerprint in SDGM_CAR and \
-                    self.CP.carFingerprint not in kaofui_state_cars
 
     self.prev_cruise_buttons = self.cruise_buttons
     self.prev_distance_button = self.distance_button
-    if not sdgm_non_volt:
-      self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
-      self.distance_button = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"]
-      self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
-      self.steering_button_checksum = pt_cp.vl["ASCMSteeringButton"]["SteeringButtonChecksum"]
-      acc_always_one = pt_cp.vl["ASCMSteeringButton"]["ACCAlwaysOne"]
-      acc_hidden_bit = pt_cp.vl["ASCMSteeringButton"].get("ACCHiddenBit", 0)
-      self.steering_button_prefix = (int(acc_always_one) & 1) | ((int(acc_hidden_bit) & 1) << 6)
-    else:
-      self.cruise_buttons = cam_cp.vl["ASCMSteeringButton"]["ACCButtons"]
-      self.distance_button = cam_cp.vl["ASCMSteeringButton"]["DistanceButton"]
-      self.buttons_counter = cam_cp.vl["ASCMSteeringButton"]["RollingCounter"]
+    self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
+    self.distance_button = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"]
+    self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
     # This is to avoid a fault where you engage while still moving backwards after shifting to D.
     # An Equinox has been seen with an unsupported status (3), so only check if either wheel is in reverse (2)
@@ -72,13 +56,6 @@ class CarState(CarStateBase):
     self.loopback_lka_steering_cmd_updated = len(loopback_cp.vl_all["ASCMLKASteeringCmd"]["RollingCounter"]) > 0
     if self.loopback_lka_steering_cmd_updated:
       self.loopback_lka_steering_cmd_ts_nanos = loopback_cp.ts_nanos["ASCMLKASteeringCmd"]["RollingCounter"]
-
-    # Track timestamps for OEM PRNDL2 and Regen Paddle messages (used to sync spoofing timing)
-    self.prndl2_ts_nanos = pt_cp.ts_nanos["ECMPRDNL2"]["PRNDL2"]
-    if self.CP.carFingerprint in CC_REGEN_PADDLE_CAR:
-      self.regen_paddle_ts_nanos = pt_cp.ts_nanos["EBCMRegenPaddle"]["RegenPaddle"]
-    else:
-      self.regen_paddle_ts_nanos = 0
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.flags & GMFlags.NO_CAMERA.value:
       self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
       self.cam_lka_steering_cmd_counter = cam_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
@@ -99,38 +76,25 @@ class CarState(CarStateBase):
     else:
       ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL2"]["PRNDL2"], None))
 
-    no_accel_pos = bool(self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value)
-
-    if no_accel_pos:
-      if self.CP.carFingerprint in kaofui_state_cars:
-        ret.brake = pt_cp.vl.get("EBCMBrakePedalPosition", {}).get("BrakePedalPosition", 0) / 0xd0
-      else:
-        ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
+    if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
+      ret.brake = pt_cp.vl.get("EBCMBrakePedalPosition", {}).get("BrakePedalPosition", 0) / 0xd0
     else:
-      if self.CP.carFingerprint in kaofui_state_cars:
-        ret.brake = pt_cp.vl.get("ECMAcceleratorPos", {}).get("BrakePedalPos", 0)
-      else:
-        ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
+      ret.brake = pt_cp.vl.get("ECMAcceleratorPos", {}).get("BrakePedalPos", 0)
 
-    if self.CP.carFingerprint in {CAR.CHEVROLET_MALIBU_CC} or (self.CP.carFingerprint == CAR.CHEVROLET_BLAZER and not no_accel_pos):
-      ret.brakePressed = ret.brake >= 8
-    elif (self.CP.flags & GMFlags.FORCE_BRAKE_C9.value) or ((self.CP.networkLocation == NetworkLocation.fwdCamera) and (self.CP.carFingerprint != CAR.CHEVROLET_BLAZER)):
+    if (self.CP.flags & GMFlags.FORCE_BRAKE_C9.value) or ((self.CP.networkLocation == NetworkLocation.fwdCamera) and (self.CP.carFingerprint != CAR.CHEVROLET_BLAZER)):
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
     else:
       # Some Volt 2016-17 have loose brake pedal push rod retainers which causes the ECM to believe
       # that the brake is being intermittently pressed without user interaction.
       # To avoid a cruise fault we need to use a conservative brake position threshold
       # https://static.nhtsa.gov/odi/tsbs/2017/MC-10137629-9999.pdf
-      analog_thresh = 0.10 if no_accel_pos else 8
+      analog_thresh = 0.07 if (self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value) else 8
       ret.brakePressed = ret.brake >= analog_thresh
 
     # Regen braking is braking
     if self.CP.transmissionType == TransmissionType.direct:
       ret.regenBraking = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
-      self.single_pedal_mode = (ret.gearShifter == GearShifter.low or
-                                pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1 or
-                                (ret.regenBraking and GearShifter.manumatic) or
-                                (self.CP.carFingerprint in (CAR.CHEVROLET_BOLT_ACC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL, CAR.CHEVROLET_BOLT_CC_2022_2023) and self.CP.enableGasInterceptor))
+      self.single_pedal_mode = ret.gearShifter == GearShifter.low or pt_cp.vl["EVDriveMode"]["SinglePedalModeActive"] == 1 or (ret.regenBraking and GearShifter.manumatic) or (self.CP.carFingerprint in [CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_BOLT_CC] and self.CP.enableGasInterceptor)
 
     if self.CP.enableGasInterceptor:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
@@ -151,83 +115,61 @@ class CarState(CarStateBase):
     ret.steerFaultTemporary = self.lkas_status == 2
     ret.steerFaultPermanent = self.lkas_status == 3
 
-    if not sdgm_non_volt:
-      # 1 - open, 0 - closed
-      ret.doorOpen = (pt_cp.vl["BCMDoorBeltStatus"]["FrontLeftDoor"] == 1 or
-                      pt_cp.vl["BCMDoorBeltStatus"]["FrontRightDoor"] == 1 or
-                      pt_cp.vl["BCMDoorBeltStatus"]["RearLeftDoor"] == 1 or
-                      pt_cp.vl["BCMDoorBeltStatus"]["RearRightDoor"] == 1)
 
-      # 1 - latched
-      ret.seatbeltUnlatched = pt_cp.vl["BCMDoorBeltStatus"]["LeftSeatBelt"] == 0
-      ret.leftBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 1
-      ret.rightBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
+    # 1 - open, 0 - closed
+    ret.doorOpen = (pt_cp.vl["BCMDoorBeltStatus"]["FrontLeftDoor"] == 1 or
+                    pt_cp.vl["BCMDoorBeltStatus"]["FrontRightDoor"] == 1 or
+                    pt_cp.vl["BCMDoorBeltStatus"]["RearLeftDoor"] == 1 or
+                    pt_cp.vl["BCMDoorBeltStatus"]["RearRightDoor"] == 1)
 
-      ret.parkingBrake = pt_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
-    else:
-      # 1 - open, 0 - closed
-      ret.doorOpen = (cam_cp.vl["BCMDoorBeltStatus"]["FrontLeftDoor"] == 1 or
-                      cam_cp.vl["BCMDoorBeltStatus"]["FrontRightDoor"] == 1 or
-                      cam_cp.vl["BCMDoorBeltStatus"]["RearLeftDoor"] == 1 or
-                      cam_cp.vl["BCMDoorBeltStatus"]["RearRightDoor"] == 1)
+    # 1 - latched
+    ret.seatbeltUnlatched = pt_cp.vl["BCMDoorBeltStatus"]["LeftSeatBelt"] == 0
+    ret.leftBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 1
+    ret.rightBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
 
-      # 1 - latched
-      ret.seatbeltUnlatched = cam_cp.vl["BCMDoorBeltStatus"]["LeftSeatBelt"] == 0
-      ret.leftBlinker = cam_cp.vl["BCMTurnSignals"]["TurnSignals"] == 1
-      ret.rightBlinker = cam_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
-
-      ret.parkingBrake = cam_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
+    ret.parkingBrake = pt_cp.vl["BCMGeneralPlatformStatus"]["ParkBrakeSwActive"] == 1
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
-                      pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
+    cruise_state_raw = pt_cp.vl["AcceleratorPedal2"]["CruiseState"]
+    friction_brake_unavail = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"]
+    ret.accFaulted = (cruise_state_raw == AccState.FAULTED or friction_brake_unavail == 1)
 
-    ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
+    # SDGM/SASCM debug: log on fault rising edge
+    if self.is_sdgm_sascm and ret.accFaulted and not self.prev_acc_faulted:
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: accFaulted=True CruiseState=%d(FAULTED=%d) FrictionBrakeUnavail=%d" %
+                       (cruise_state_raw, AccState.FAULTED, friction_brake_unavail))
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: vEgo=%.2f brakePressed=%s gasPressed=%s steeringTorque=%.1f" %
+                       (ret.vEgoRaw, ret.brakePressed, ret.gasPressed, ret.steeringTorque))
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: lkas_status=%d steerFaultTemp=%s steerFaultPerm=%s" %
+                       (self.lkas_status, ret.steerFaultTemporary, ret.steerFaultPermanent))
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: pt_lka_counter=%d cam_lka_counter=%d buttons_counter=%d" %
+                       (self.pt_lka_steering_cmd_counter, self.cam_lka_steering_cmd_counter, self.buttons_counter))
+      cloudlog.warning("GM_SDGM_DEBUG FAULT: cruiseAvailable=%s cruiseEnabled=%s standstill=%s" %
+                       (ret.cruiseState.available, ret.cruiseState.enabled, ret.cruiseState.standstill))
+    self.prev_acc_faulted = ret.accFaulted
+
+    ret.cruiseState.enabled = cruise_state_raw != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.flags & GMFlags.NO_CAMERA.value:
       if self.CP.carFingerprint not in CC_ONLY_CAR:
         ret.cruiseState.speed = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCSpeedSetpoint"] * CV.KPH_TO_MS
-      if self.CP.carFingerprint not in (SDGM_CAR | ASCM_INT):
+      if self.CP.carFingerprint not in (SDGM_CAR|ASCM_INT):
         ret.stockAeb = cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
-      else:
-        ret.stockAeb = False
       # openpilot controls nonAdaptive when not pcmCruise
+      # 2016-2018 Volt won't identify non-adaptive cruise state since switchable cruise state was not introduced till 2019 model year / SDGM Global AAdd commentMore actions
       if self.CP.pcmCruise and self.CP.carFingerprint not in ASCM_INT:
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)
     if self.CP.carFingerprint in CC_ONLY_CAR:
-      self.ecm_cruise_control_ts_nanos = pt_cp.ts_nanos["ECMCruiseControl"]["CruiseActive"]
-      self.accelerator_pedal2_ts_nanos = pt_cp.ts_nanos["AcceleratorPedal2"]["CruiseState"]
       ret.accFaulted = False
       ret.cruiseState.speed = pt_cp.vl["ECMCruiseControl"]["CruiseSetSpeed"] * CV.KPH_TO_MS
-      if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
-        try:
-          ret.cruiseState.enabled = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCmdActive"] != 0
-        except:
-          ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0
-      else:
-        # Most CC paths use ECM first.
-        try:
-          ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0
-        except:
-          ret.cruiseState.enabled = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCmdActive"] != 0
-    else:
-      self.ecm_cruise_control_ts_nanos = 0
-      self.accelerator_pedal2_ts_nanos = 0
+      ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0
 
     if self.CP.enableBsm:
-      if not sdgm_non_volt:
-        ret.leftBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
-        ret.rightBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
-      else:
-        ret.leftBlindspot = cam_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
-        ret.rightBlindspot = cam_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
+      ret.leftBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
+      ret.rightBlindspot = pt_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
 
-    # FrogPilot CarState functions
     self.lkas_previously_enabled = self.lkas_enabled
-    if sdgm_non_volt:
-      self.lkas_enabled = cam_cp.vl["ASCMSteeringButton"]["LKAButton"]
-    else:
-      self.lkas_enabled = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]
+    self.lkas_enabled = pt_cp.vl["ASCMSteeringButton"]["LKAButton"]
 
     self.pcm_acc_status = pt_cp.vl["AcceleratorPedal2"]["CruiseState"]
 
@@ -239,31 +181,14 @@ class CarState(CarStateBase):
   def get_cam_can_parser(CP, FPCP):
     messages = []
     if CP.networkLocation == NetworkLocation.fwdCamera and not CP.flags & GMFlags.NO_CAMERA.value:
-      volt_like = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_CC}
-      kaofui_state_cars = volt_like | SDGM_CAR | ASCM_INT | {
-        CAR.CHEVROLET_BLAZER,
-        CAR.CHEVROLET_MALIBU_SDGM,
-        CAR.CHEVROLET_MALIBU_HYBRID_CC,
-      }
-      sdgm_non_volt = CP.carFingerprint in SDGM_CAR and \
-                      CP.carFingerprint not in kaofui_state_cars
       messages += [
         ("ASCMLKASteeringCmd", 10),
       ]
-      if sdgm_non_volt:
-        messages += [
-          ("BCMTurnSignals", 1),
-          ("BCMDoorBeltStatus", 10),
-          ("BCMGeneralPlatformStatus", 10),
-          ("ASCMSteeringButton", 33),
-        ]
-        if CP.enableBsm:
-          messages.append(("BCMBlindSpotMonitor", 10))
-      elif CP.carFingerprint not in (SDGM_CAR | ASCM_INT):
+      if CP.carFingerprint not in (SDGM_CAR|ASCM_INT):
         messages += [
           ("AEBCmd", 10),
         ]
-      if CP.carFingerprint not in CC_ONLY_CAR or CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
+      if CP.carFingerprint not in CC_ONLY_CAR:
         messages += [
           ("ASCMActiveCruiseControlStatus", 25),
         ]
@@ -273,43 +198,25 @@ class CarState(CarStateBase):
   @staticmethod
   def get_can_parser(CP, FPCP):
     messages = [
+      ("BCMTurnSignals", 1),
+      ("ECMPRDNL2", 10),
       ("PSCMStatus", 10),
       ("ESPStatus", 10),
+      ("BCMDoorBeltStatus", 10),
+      ("BCMGeneralPlatformStatus", 10),
       ("EBCMWheelSpdFront", 20),
       ("EBCMWheelSpdRear", 20),
       ("EBCMFrictionBrakeStatus", 20),
+      ("AcceleratorPedal2", 33),
+      ("ASCMSteeringButton", 33),
+      ("ECMEngineStatus", 100),
       ("PSCMSteeringAngle", 100),
       ("ECMAcceleratorPos", 80),
       ("SportMode", 0),
     ]
 
-    volt_like = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_CC}
-    kaofui_state_cars = volt_like | SDGM_CAR | ASCM_INT | {
-      CAR.CHEVROLET_BLAZER,
-      CAR.CHEVROLET_MALIBU_SDGM,
-      CAR.CHEVROLET_MALIBU_HYBRID_CC,
-    }
-    prndl2_rate = 10 if CP.carFingerprint in kaofui_state_cars else 40
-    sdgm_non_volt = CP.carFingerprint in SDGM_CAR and \
-                    CP.carFingerprint not in kaofui_state_cars
-    if sdgm_non_volt:
-      messages += [
-        ("ECMPRDNL2", prndl2_rate),
-        ("AcceleratorPedal2", 40),
-        ("ECMEngineStatus", 80),
-      ]
-    else:
-      messages += [
-        ("ECMPRDNL2", prndl2_rate),
-        ("AcceleratorPedal2", 33),
-        ("ECMEngineStatus", 100),
-        ("BCMTurnSignals", 1),
-        ("BCMDoorBeltStatus", 10),
-        ("BCMGeneralPlatformStatus", 10),
-        ("ASCMSteeringButton", 33),
-      ]
-      if CP.enableBsm:
-        messages.append(("BCMBlindSpotMonitor", 10))
+    if CP.enableBsm:
+      messages.append(("BCMBlindSpotMonitor", 10))
 
     # Used to read back last counter sent to PT by camera
     if CP.networkLocation == NetworkLocation.fwdCamera:
@@ -321,9 +228,8 @@ class CarState(CarStateBase):
         messages.append(("EBCMBrakePedalPosition", 100))
 
     if CP.transmissionType == TransmissionType.direct:
-      regen_paddle_rate = 50 if CP.carFingerprint in kaofui_state_cars else 40
       messages += [
-        ("EBCMRegenPaddle", regen_paddle_rate),
+        ("EBCMRegenPaddle", 50),
         ("EVDriveMode", 0),
       ]
 
@@ -336,6 +242,7 @@ class CarState(CarStateBase):
       messages += [
         ("GAS_SENSOR", 50),
       ]
+
 
     return CANParser(DBC[CP.carFingerprint]["pt"], messages, CanBus.POWERTRAIN)
 
