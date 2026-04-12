@@ -26,7 +26,7 @@ fi
 #    The prebuilt/release branches ship submodule contents as flat directories.
 #    When we switch to a source branch, git refuses to clone into non-empty dirs.
 echo "[1/4] Cleaning orphan submodule dirs..."
-for d in msgq_repo tinygrad_repo teleoprtc_repo rednose_repo; do
+for d in msgq_repo tinygrad_repo teleoprtc_repo rednose_repo opendbc_repo panda; do
   # Only remove if NOT a proper submodule (has .git file/dir) and is populated
   if [ -d "$d" ] && [ ! -e "$d/.git" ]; then
     echo "  removing orphan $d/"
