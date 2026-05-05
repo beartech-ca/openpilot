@@ -16,7 +16,7 @@ from opendbc.car.values import BRANDS
 from opendbc.car.vin import get_vin, is_valid_vin, VIN_UNKNOWN
 from openpilot.common.params import Params
 
-FRAME_FINGERPRINT = 100  # 1s
+FRAME_FINGERPRINT = 500  # 5s
 
 StarPilotCarParams = custom.StarPilotCarParams
 
@@ -193,8 +193,8 @@ def can_fingerprint(can_recv: CanRecvCallable) -> tuple[str | None, dict[int, di
           # fingerprint done
           car_fingerprint = candidate_cars[b][0]
 
-      # bail if no cars left or we've been waiting for more than 2s
-      failed = (all(len(cc) == 0 for cc in candidate_cars.values()) and frame > FRAME_FINGERPRINT) or frame > 200
+      # bail if no cars left or we've been waiting for more than 6s
+      failed = (all(len(cc) == 0 for cc in candidate_cars.values()) and frame > FRAME_FINGERPRINT) or frame > 600
       succeeded = car_fingerprint is not None
       done = failed or succeeded
 

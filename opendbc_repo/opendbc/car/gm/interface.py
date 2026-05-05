@@ -198,7 +198,7 @@ class CarInterface(CarInterfaceBase):
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
     ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
-    has_sascm = 0x2FF in fingerprint[CanBus.POWERTRAIN]
+    has_sascm = any(0x2FF in bus for bus in fingerprint.values())
     if has_sascm:
       ret.flags |= GMFlags.SASCM.value
 
