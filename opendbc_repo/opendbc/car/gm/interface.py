@@ -66,8 +66,10 @@ def _sascm_diag_send(candidate, fingerprint, has_sascm, sascm_locations):
         },
       )
       urllib.request.urlopen(req, timeout=5)
-    except Exception:
-      pass
+    except Exception as e:
+      # Diagnostics is best-effort; never raise. But surface the failure to
+      # swaglog/journald so we don't lose the signal we built this for.
+      print(f"[SASCM] diag POST failed: {type(e).__name__}: {e}")
 
   threading.Thread(target=_send, daemon=True).start()
 
