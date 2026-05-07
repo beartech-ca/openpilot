@@ -198,7 +198,22 @@ class CarInterface(CarInterfaceBase):
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
     ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
-    has_sascm = any(0x2FF in bus for bus in fingerprint.values())
+
+    # SASCM detection + diagnostic dump (kept while detection is being tuned).
+    # Lines starting with [SASCM] land in /data/log/longterm/<boot>/swaglog.zst
+    # and also fall through to journald, so SSH `dmesg | grep SASCM` works too.
+    sascm_locations = [bus_idx for bus_idx, msgs in fingerprint.items() if 0x2FF in msgs]
+    has_sascm = len(sascm_locations) > 0
+    print(f"[SASCM] fingerprint buses = {sorted(fingerprint.keys())}")
+    print(f"[SASCM] msg counts per bus = {{ {', '.join(f'{b}: {len(m)}' for b, m in sorted(fingerprint.items()))} }}")
+    print(f"[SASCM] 0x2FF found on buses = {sascm_locations}  has_sascm = {has_sascm}")
+    if not has_sascm:
+      # Check whether the message came in on any unexpectedly-numbered bus.
+      print(f"[SASCM] 0x2FF nowhere in fingerprint. All msg ids per bus:")
+      for b in sorted(fingerprint.keys()):
+        ids = sorted(fingerprint[b])
+        print(f"[SASCM]   bus {b}: {len(ids)} ids, sample={ids[:8]}{'...' if len(ids) > 8 else ''}")
+
     if has_sascm:
       ret.flags |= GMFlags.SASCM.value
 
