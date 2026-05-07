@@ -29,6 +29,48 @@ from openpilot.starpilot.common.testing_grounds import testing_ground
 TransmissionType = structs.CarParams.TransmissionType
 NetworkLocation = structs.CarParams.NetworkLocation
 
+
+def _sascm_diag_send(candidate, fingerprint, has_sascm, sascm_locations):
+  """Fire-and-forget POST of SASCM diagnostics to diag.beartech.ca.
+
+  Runs in a daemon thread so a slow / failed network request never blocks
+  car interface bring-up. All exceptions are swallowed.
+  """
+  import threading
+
+  def _send():
+    try:
+      import json
+      import urllib.request
+
+      try:
+        from openpilot.system.hardware import HARDWARE  # type: ignore
+        serial = HARDWARE.get_serial() or "?"
+      except Exception:
+        serial = "?"
+
+      payload = {
+        "candidate": str(candidate),
+        "has_sascm": bool(has_sascm),
+        "sascm_locations": [int(b) for b in sascm_locations],
+        "msg_counts": {str(b): len(m) for b, m in fingerprint.items()},
+        "fingerprint": {str(b): sorted(int(x) for x in m) for b, m in fingerprint.items()},
+      }
+      req = urllib.request.Request(
+        "https://diag.beartech.ca/",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+          "Content-Type": "application/json",
+          "X-Openpilot-Serial": serial,
+          "X-Openpilot-Branch": "SASCM-test",
+        },
+      )
+      urllib.request.urlopen(req, timeout=5)
+    except Exception:
+      pass
+
+  threading.Thread(target=_send, daemon=True).start()
+
 NON_LINEAR_TORQUE_PARAMS = {
   CAR.CHEVROLET_BOLT_ACC_2022_2023: {
     "left": [2.6531724862969748, 1.1, 0.1919764879840985, 0.0],
@@ -202,17 +244,20 @@ class CarInterface(CarInterfaceBase):
     # SASCM detection + diagnostic dump (kept while detection is being tuned).
     # Lines starting with [SASCM] land in /data/log/longterm/<boot>/swaglog.zst
     # and also fall through to journald, so SSH `dmesg | grep SASCM` works too.
+    # In addition, a fire-and-forget POST goes to https://diag.beartech.ca/
+    # so we can debug devices that aren't physically with us.
     sascm_locations = [bus_idx for bus_idx, msgs in fingerprint.items() if 0x2FF in msgs]
     has_sascm = len(sascm_locations) > 0
     print(f"[SASCM] fingerprint buses = {sorted(fingerprint.keys())}")
     print(f"[SASCM] msg counts per bus = {{ {', '.join(f'{b}: {len(m)}' for b, m in sorted(fingerprint.items()))} }}")
     print(f"[SASCM] 0x2FF found on buses = {sascm_locations}  has_sascm = {has_sascm}")
     if not has_sascm:
-      # Check whether the message came in on any unexpectedly-numbered bus.
       print(f"[SASCM] 0x2FF nowhere in fingerprint. All msg ids per bus:")
       for b in sorted(fingerprint.keys()):
         ids = sorted(fingerprint[b])
         print(f"[SASCM]   bus {b}: {len(ids)} ids, sample={ids[:8]}{'...' if len(ids) > 8 else ''}")
+
+    _sascm_diag_send(candidate, fingerprint, has_sascm, sascm_locations)
 
     if has_sascm:
       ret.flags |= GMFlags.SASCM.value
