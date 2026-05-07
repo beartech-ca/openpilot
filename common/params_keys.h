@@ -166,6 +166,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AvailableModelNames", {PERSISTENT, STRING, "", "", 1}},
     {"AvailableModelSeries", {PERSISTENT, STRING, "", "", 1}},
     {"AvailableModels", {PERSISTENT, STRING, "", "", 1}},
+    {"BeartechDiagCode", {PERSISTENT, STRING, "", "", 0}},
     {"BlacklistedModels", {PERSISTENT, STRING, "", "", 2}},
     {"BootLogo", {PERSISTENT, STRING, "starpilot", "stock", 0}},
     {"BuildMetadata", {PERSISTENT, STRING, "", "", 0}},

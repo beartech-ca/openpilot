@@ -33,10 +33,22 @@ NetworkLocation = structs.CarParams.NetworkLocation
 def _sascm_diag_send(candidate, fingerprint, has_sascm, sascm_locations):
   """Fire-and-forget POST of SASCM diagnostics to diag.beartech.ca.
 
+  Requires the user to have set the BeartechDiagCode Param (5-digit code,
+  obtained out-of-band from the operator). If the param is unset or
+  malformed, the diag POST is skipped silently.
+
   Runs in a daemon thread so a slow / failed network request never blocks
-  car interface bring-up. All exceptions are swallowed.
+  car interface bring-up. Network exceptions surface to swaglog only.
   """
   import threading
+
+  try:
+    raw_code = Params().get("BeartechDiagCode", encoding="utf-8")
+    diag_code = (raw_code or "").strip()
+  except (UnknownKeyName, Exception):
+    diag_code = ""
+  if len(diag_code) != 5 or not diag_code.isdigit():
+    return  # not configured; nothing to send
 
   def _send():
     try:
@@ -63,6 +75,7 @@ def _sascm_diag_send(candidate, fingerprint, has_sascm, sascm_locations):
           "Content-Type": "application/json",
           "X-Openpilot-Serial": serial,
           "X-Openpilot-Branch": "SASCM-test",
+          "X-Diag-Code": diag_code,
         },
       )
       urllib.request.urlopen(req, timeout=5)

@@ -1,5 +1,7 @@
 #include <sys/xattr.h>
 
+#include <algorithm>
+
 #include "starpilot/ui/qt/offroad/data_settings.h"
 
 namespace {
@@ -66,6 +68,31 @@ StarPilotDataPanel::StarPilotDataPanel(StarPilotSettingsWindow *parent, bool for
     deleteDrivingDataButton->showDescription();
   }
   dataMainList->addItem(deleteDrivingDataButton);
+
+  ButtonControl *diagCodeButton = new ButtonControl(tr("Diagnostic Code (beartech)"), tr("SET"), tr("<b>Enter the 5-digit diagnostic code from beartech</b> to authorize this device to upload SASCM/CAN fingerprint diagnostics to diag.beartech.ca. The code is bound to this device on first use; leave the input blank to clear."));
+  {
+    QString curCode = QString::fromStdString(params.get("BeartechDiagCode"));
+    if (curCode.length() == 5) {
+      diagCodeButton->setValue(tr("Set: %1").arg(curCode));
+    }
+  }
+  QObject::connect(diagCodeButton, &ButtonControl::clicked, [=]() {
+    QString cur = QString::fromStdString(params.get("BeartechDiagCode"));
+    QString code = InputDialog::getText(tr("Enter 5-digit diagnostic code (blank = clear)"), this, "", false, 0, cur).trimmed();
+    if (code.isEmpty()) {
+      params.remove("BeartechDiagCode");
+      diagCodeButton->setValue(tr("(cleared)"));
+    } else if (code.length() == 5 && std::all_of(code.begin(), code.end(), [](QChar c) { return c.isDigit(); })) {
+      params.put("BeartechDiagCode", code.toStdString());
+      diagCodeButton->setValue(tr("Set: %1").arg(code));
+    } else {
+      ConfirmationDialog::alert(tr("Code must be exactly 5 digits."), this);
+    }
+  });
+  if (forceOpenDescriptions) {
+    diagCodeButton->showDescription();
+  }
+  dataMainList->addItem(diagCodeButton);
 
   ButtonControl *deleteErrorLogsButton = new ButtonControl(tr("Delete Error Logs"), tr("DELETE"), tr("<b>Delete collected error logs</b> to free up space and clear old crash records."));
   QObject::connect(deleteErrorLogsButton, &ButtonControl::clicked, [=]() {
