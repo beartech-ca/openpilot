@@ -270,7 +270,15 @@ class CarController(CarControllerBase, GasInterceptorCarController):
         elif net_acceleration_request_min > 0.3:
           self.permit_braking = False
 
-        pcm_accel_cmd = pcm_accel_cmd if self.CP.carFingerprint in TSS2_CAR else actuators.accel
+        # Use the planner's raw actuators.accel ONLY for a smartDSU + TSS-P car while actively controlling
+        # longitudinal. In every other case (TSS2, no smartDSU, or not CC.longActive) keep the inactive/PID
+        # pcm_accel_cmd. This narrowly targets the smartDSU + TSS-P op-long case: the moment longitudinal is
+        # no longer active (gas override / disengage) ACC_CONTROL goes inactive (accel=0) so panda doesn't
+        # block it (gas_pressed -> longitudinal not allowed), 0x343 keeps flowing, and the smartDSU stays in
+        # op_ctrl_mode instead of timing out to passthrough -> stock 0x343 returns -> permanent relay_malfunction.
+        sdsu_tssp_long_active = bool(self.CP_IQ.flags & ToyotaFlagsIQ.SMART_DSU) and \
+                                (self.CP.carFingerprint not in TSS2_CAR) and CC.longActive
+        pcm_accel_cmd = actuators.accel if sdsu_tssp_long_active else pcm_accel_cmd
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
 
         main_accel_cmd = 0. if self.CP.flags & ToyotaFlags.SECOC.value else pcm_accel_cmd
