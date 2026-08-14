@@ -323,7 +323,7 @@ class CarState(CarStateBase):
         ret.stockAeb = False
 
       # openpilot controls nonAdaptive when not pcmCruise
-      if self.CP.pcmCruise and self.CP.carFingerprint not in ASCM_INT:
+      if self.CP.pcmCruise and self.CP.carFingerprint not in ASCM_INT and has_acc_dashboard_status:
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)
 
     if self.CP.carFingerprint in CC_ONLY_CAR:

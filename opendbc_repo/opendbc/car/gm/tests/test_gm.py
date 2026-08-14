@@ -66,6 +66,26 @@ class TestGMFingerprint:
 
 
 class TestGMInterface:
+  def test_bolt_cc_state_does_not_require_missing_acc_camera_status(self):
+    car_model = CAR.CHEVROLET_BOLT_CC_2018_2021
+    CarInterface = interfaces[car_model]
+    fingerprint = _empty_fingerprint()
+    toggles = _test_starpilot_toggles()
+    car_params = CarInterface.get_params(car_model, fingerprint, [], alpha_long=False, is_release=False, docs=False,
+                                         starpilot_toggles=toggles)
+    # Match the recorded C4 route, where stock cruise is active and this
+    # non-ACC platform has no ASCMActiveCruiseControlStatus (0x370).
+    car_params.pcmCruise = True
+    car_params.networkLocation = structs.CarParams.NetworkLocation.fwdCamera
+    car_params.flags = GMFlags.CC_LONG.value
+    starpilot_params = CarInterface.get_starpilot_params(car_model, fingerprint, [], car_params, toggles)
+    car_state = GMCarState(car_params, starpilot_params)
+    can_parsers = car_state.get_can_parsers(car_params)
+
+    assert "ASCMActiveCruiseControlStatus" not in can_parsers[Bus.cam].vl
+    car_state.update(can_parsers, toggles)
+    assert "ASCMActiveCruiseControlStatus" not in can_parsers[Bus.cam].vl
+
   @parameterized.expand([
     CAR.CHEVROLET_BOLT_CC_2017,
     CAR.CHEVROLET_BOLT_CC_2018_2021,
