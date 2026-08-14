@@ -66,7 +66,8 @@ class TestGMFingerprint:
 
 
 class TestGMInterface:
-  def test_bolt_cc_state_does_not_require_missing_acc_camera_status(self):
+  @pytest.mark.parametrize("pedal_enabled", (False, True))
+  def test_bolt_cc_state_does_not_require_missing_acc_camera_status(self, pedal_enabled):
     car_model = CAR.CHEVROLET_BOLT_CC_2018_2021
     CarInterface = interfaces[car_model]
     fingerprint = _empty_fingerprint()
@@ -77,7 +78,8 @@ class TestGMInterface:
     # non-ACC platform has no ASCMActiveCruiseControlStatus (0x370).
     car_params.pcmCruise = True
     car_params.networkLocation = structs.CarParams.NetworkLocation.fwdCamera
-    car_params.flags = GMFlags.CC_LONG.value
+    car_params.enableGasInterceptorDEPRECATED = pedal_enabled
+    car_params.flags = GMFlags.PEDAL_LONG.value if pedal_enabled else GMFlags.CC_LONG.value
     starpilot_params = CarInterface.get_starpilot_params(car_model, fingerprint, [], car_params, toggles)
     car_state = GMCarState(car_params, starpilot_params)
     can_parsers = car_state.get_can_parsers(car_params)
