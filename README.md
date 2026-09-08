@@ -9,11 +9,11 @@ matching set and an offline regression test. Lateral control, longitudinal
 control, and the inherited safety implementation remain at that baseline.
 
 The source branch is `transit` in [beartech-ca/openpilot](https://github.com/beartech-ca/openpilot/tree/transit).
-Its opendbc dependency is maintained in
-[beartech-ca/transit-opendbc](https://github.com/beartech-ca/transit-opendbc),
-and this revision's Git LFS assets are hosted in this repository.
-The opendbc dependency is private; recursive cloning requires GitHub credentials
-with access to that repository.
+Its dependencies are maintained in the public
+[beartech-ca/opendbc](https://github.com/beartech-ca/opendbc/tree/transit) and
+[beartech-ca/panda](https://github.com/beartech-ca/panda/tree/transit) repositories.
+Both use a `transit` branch, while this branch pins their exact commits.
+This revision's Git LFS assets are hosted in this repository.
 
 ```sh
 git clone --branch transit --recurse-submodules https://github.com/beartech-ca/openpilot.git
