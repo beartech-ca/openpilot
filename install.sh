@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# ford-lka install script
+# transit install script
 # Handles switching from stock prebuilt branches to our source branch cleanly.
 #
 # Usage (on comma device):
 #   cd /data/openpilot
-#   git remote set-url origin https://github.com/ghostdev137/openpilot.git
-#   git fetch origin ford-lka:ford-lka --force
-#   git checkout -f ford-lka
+#   git remote set-url origin https://github.com/beartech-ca/transit.git
+#   git fetch origin transit:transit --force
+#   git checkout -f transit
 #   bash install.sh
 
 set -e
 
 cd "$(dirname "$0")"
 
-echo "=== ford-lka install ==="
+echo "=== transit install ==="
 
 # 1. Verify we're on the right branch
 branch=$(git rev-parse --abbrev-ref HEAD)
-if [ "$branch" != "ford-lka" ]; then
-  echo "ERROR: not on ford-lka branch (on $branch)"
+if [ "$branch" != "transit" ]; then
+  echo "ERROR: not on transit branch (on $branch)"
   exit 1
 fi
 
@@ -55,7 +55,7 @@ for f in opendbc_repo/opendbc/car/ford/values.py panda/board/main.c tinygrad_rep
 done
 
 # 6. Set update target and clear cached carparams so fingerprint re-runs
-echo -n "ford-lka" > /data/params/d/UpdaterTargetBranch
+echo -n "transit" > /data/params/d/UpdaterTargetBranch
 rm -f /data/params/d/CarParamsCache /data/params/d/CarParamsPersistent
 
 echo ""

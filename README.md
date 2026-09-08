@@ -1,3 +1,31 @@
+# transit
+
+Beartech's Ford Transit LKA source fork of openpilot.
+
+This repository preserves the `ghostdev137/ford-lka` baseline at openpilot
+`8389a6aa3a47611dac70c7864c9f4cf67516d413` and opendbc
+`f4bfa25411755e5ab1aaeaac2b3663b495fd3d59`. It adds a 2022 Ford Transit firmware
+matching set and an offline regression test. Lateral control, longitudinal
+control, and the inherited safety implementation remain at that baseline.
+
+The source branch is `transit`. Its opendbc dependency is maintained in
+[beartech-ca/transit-opendbc](https://github.com/beartech-ca/transit-opendbc),
+and this revision's Git LFS assets are hosted in this repository.
+
+```sh
+git clone --branch transit --recurse-submodules https://github.com/beartech-ca/transit.git
+```
+
+This is a source publication, not a prebuilt device release. The 2022 firmware
+matching set has passed offline tests; recognition from live openpilot firmware
+queries and on-vehicle operation have not been validated. PSCM firmware images
+are not included. See [the publication record](change_log/2026-09-08-transit.md)
+for scope and validation.
+
+## Upstream openpilot documentation
+
+The upstream documentation below describes comma's openpilot project and releases.
+
 <div align="center" style="text-align: center;">
 
 <h1>openpilot</h1>
