@@ -4,7 +4,7 @@
 #
 # Usage (on comma device):
 #   cd /data/openpilot
-#   git remote set-url origin https://github.com/beartech-ca/transit.git
+#   git remote set-url origin https://github.com/beartech-ca/openpilot.git
 #   git fetch origin transit:transit --force
 #   git checkout -f transit
 #   bash install.sh
