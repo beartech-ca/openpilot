@@ -12,6 +12,8 @@ The source branch is `transit` in [beartech-ca/openpilot](https://github.com/bea
 Its opendbc dependency is maintained in
 [beartech-ca/transit-opendbc](https://github.com/beartech-ca/transit-opendbc),
 and this revision's Git LFS assets are hosted in this repository.
+The opendbc dependency is private; recursive cloning requires GitHub credentials
+with access to that repository.
 
 ```sh
 git clone --branch transit --recurse-submodules https://github.com/beartech-ca/openpilot.git
