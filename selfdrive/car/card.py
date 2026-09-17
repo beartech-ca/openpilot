@@ -14,6 +14,7 @@ from openpilot.common.swaglog import cloudlog, ForwardingHandler
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
+from opendbc.car.ford import transit_lka
 from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
@@ -91,13 +92,22 @@ class Car:
 
       alpha_long_allowed = self.params.get_bool("AlphaLongitudinalEnabled")
 
+      # Transit LKA A/B test switches, packed into spare CarParams.flags bits (see
+      # opendbc/car/ford/values.py). All-default settings pack to 0, so this is a no-op
+      # for every other brand and platform.
+      extra_flags = transit_lka.pack_flags(
+        self.params.get("TransitLkaIntervention", return_default=True),
+        self.params.get("TransitLkaRamp", return_default=True),
+        self.params.get("TransitLkaDirectionSign", return_default=True),
+      )
+
       cached_params = None
       cached_params_raw = self.params.get("CarParamsCache")
       if cached_params_raw is not None:
         with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
           cached_params = _cached_params
 
-      self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params)
+      self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, cached_params, extra_flags)
       self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP)
       self.CP = self.CI.CP
 
