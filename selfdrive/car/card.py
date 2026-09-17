@@ -14,7 +14,7 @@ from openpilot.common.swaglog import cloudlog, ForwardingHandler
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
-from opendbc.car.ford import transit_lka
+from opendbc.car.ford import values as ford_values
 from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
@@ -95,7 +95,7 @@ class Car:
       # Transit LKA A/B test switches, packed into spare CarParams.flags bits (see
       # opendbc/car/ford/values.py). All-default settings pack to 0, so this is a no-op
       # for every other brand and platform.
-      extra_flags = transit_lka.pack_flags(
+      extra_flags = ford_values.pack_transit_lka_flags(
         self.params.get("TransitLkaIntervention", return_default=True),
         self.params.get("TransitLkaRamp", return_default=True),
         self.params.get("TransitLkaDirectionSign", return_default=True),
