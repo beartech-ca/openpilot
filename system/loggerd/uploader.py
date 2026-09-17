@@ -138,9 +138,24 @@ class Uploader:
     return None
 
   def do_upload(self, key: str, fn: str):
+    if fake_upload:
+      return FakeResponse()
+
     # Local logs are retained; neither automatic nor direct uploads are enabled.
+    #
+    # 412 specifically, not any other accepted code. upload() accepts
+    # (200, 201, 401, 403, 412) but only 412 takes the branch that does not read
+    # stat.request.headers, and a Response built here has request = None. 403 raised
+    # AttributeError there and killed the process every time a file came up for
+    # upload; selfdrived then reported "process not running: uploader" at engage.
+    # 412 is also upstream's own "do not upload this file" answer, and it still
+    # returns success so the file is tagged and not retried forever.
+    #
+    # The fake_upload branch above is upstream's and is kept so upstream's own
+    # tests still exercise the real upload path; it is only reachable from tests
+    # and from FAKEUPLOAD in the environment.
     response = requests.Response()
-    response.status_code = 403
+    response.status_code = 412
     return response
 
   def upload(self, name: str, key: str, fn: str, network_type: int, metered: bool) -> bool:
