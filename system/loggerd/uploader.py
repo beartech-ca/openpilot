@@ -139,6 +139,14 @@ class Uploader:
 
   def do_upload(self, key: str, fn: str):
     if fake_upload:
+      # Upstream's own test path, kept so system/loggerd/tests/test_uploader.py still
+      # covers upload(). The order matters: those tests swap in a mock Api and rely on
+      # its 412 to reach the ignore branch, so it has to be consulted before the fake
+      # response. Reachable only from FAKEUPLOAD in the environment.
+      url_resp = self.api.get("v1.4/" + self.dongle_id + "/upload_url/", timeout=10, path=key,
+                              access_token=self.api.get_token())
+      if url_resp.status_code == 412:
+        return url_resp
       return FakeResponse()
 
     # Local logs are retained; neither automatic nor direct uploads are enabled.
