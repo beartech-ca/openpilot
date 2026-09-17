@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import json
 import os
 import random
 import requests
@@ -12,7 +11,6 @@ from collections.abc import Iterator
 from cereal import log
 import cereal.messaging as messaging
 from openpilot.common.api import Api
-from openpilot.common.utils import get_upload_stream
 from openpilot.common.params import Params
 from openpilot.common.realtime import set_core_affinity
 from openpilot.system.hardware.hw import Paths
@@ -140,27 +138,10 @@ class Uploader:
     return None
 
   def do_upload(self, key: str, fn: str):
-    url_resp = self.api.get("v1.4/" + self.dongle_id + "/upload_url/", timeout=10, path=key, access_token=self.api.get_token())
-    if url_resp.status_code == 412:
-      return url_resp
-
-    url_resp_json = json.loads(url_resp.text)
-    url = url_resp_json['url']
-    headers = url_resp_json['headers']
-    cloudlog.debug("upload_url v1.4 %s %s", url, str(headers))
-
-    if fake_upload:
-      return FakeResponse()
-
-    stream = None
-    try:
-      compress = key.endswith('.zst') and not fn.endswith('.zst')
-      stream, _ = get_upload_stream(fn, compress)
-      response = requests.put(url, data=stream, headers=headers, timeout=10)
-      return response
-    finally:
-      if stream:
-        stream.close()
+    # Local logs are retained; neither automatic nor direct uploads are enabled.
+    response = requests.Response()
+    response.status_code = 403
+    return response
 
   def upload(self, name: str, key: str, fn: str, network_type: int, metered: bool) -> bool:
     try:
