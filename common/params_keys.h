@@ -116,6 +116,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TransitLkaIntervention", {PERSISTENT, INT, "0"}},
     {"TransitLkaRamp", {PERSISTENT, INT, "0"}},
     {"TransitLkaDirectionSign", {PERSISTENT, INT, "0"}},
+    {"TransitLkaAvailGate", {PERSISTENT, INT, "0"}},
     {"UbloxAvailable", {PERSISTENT, BOOL}},
     {"UpdateAvailable", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
     {"UpdateFailedCount", {CLEAR_ON_MANAGER_START, INT}},

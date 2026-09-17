@@ -99,6 +99,7 @@ class Car:
         self.params.get("TransitLkaIntervention", return_default=True),
         self.params.get("TransitLkaRamp", return_default=True),
         self.params.get("TransitLkaDirectionSign", return_default=True),
+        self.params.get("TransitLkaAvailGate", return_default=True),
       )
 
       cached_params = None
