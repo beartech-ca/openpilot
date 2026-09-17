@@ -11,6 +11,49 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
 
+# param, title, description, button labels - in the order of the enums they select,
+# which is what the button index is written as. See opendbc/car/ford/values.py.
+TRANSIT_LKA_SETTINGS = (
+  (
+    "TransitLkaIntervention",
+    tr_noop("Transit LKA: intervention"),
+    tr_noop("Which intervention the PSCM is asked for. Standard and Increasing hold one of them; " +
+            "Preset escalates to Increasing only above the angle the recorded drives showed it is needed at."),
+    (tr_noop("Standard"), tr_noop("Increasing"), tr_noop("Preset")),
+  ),
+  (
+    "TransitLkaRamp",
+    tr_noop("Transit LKA: ramp"),
+    tr_noop("How quickly the PSCM applies each request. Slow and Fast hold one of them; " +
+            "Preset switches to Fast on large or fast-changing requests."),
+    (tr_noop("Slow"), tr_noop("Fast"), tr_noop("Preset")),
+  ),
+  (
+    "TransitLkaDirectionSign",
+    tr_noop("Transit LKA: direction sign"),
+    tr_noop("Which way a positive steering request turns the van. Change this only if it steers " +
+            "the wrong way."),
+    (tr_noop("Positive is left"), tr_noop("Positive is right")),
+  ),
+  (
+    "TransitLkaAvailGate",
+    tr_noop("Transit LKA: availability gate"),
+    tr_noop("Which PSCM availability reports count as offering LKA. Below roughly 36 km/h this van " +
+            "reports LKA suppressed and openpilot stops steering; Permissive commands through that " +
+            "report to find out whether the PSCM actually steers there. Experimental."),
+    (tr_noop("Standard"), tr_noop("Permissive"), tr_noop("Any")),
+  ),
+  (
+    "TransitLkaContinuation",
+    tr_noop("Transit LKA: continue below cruise cancel"),
+    tr_noop("Keeps steering after the car cancels cruise at about 18 km/h on the way to a stop. " +
+            "Lateral only - openpilot still cannot accelerate or brake there. The van keeps steering " +
+            "while your cruise reads off, which is not what you will expect; braking releases it. " +
+            "Experimental and never driven."),
+    (tr_noop("Off"), tr_noop("On")),
+  ),
+)
+
 # Description constants
 DESCRIPTIONS = {
   "OpenpilotEnabledToggle": tr_noop(
@@ -134,6 +177,21 @@ class TogglesLayout(Widget):
       # insert longitudinal personality after NDOG toggle
       if param == "DisengageOnAccelerator":
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
+
+    # Transit LKA A/B switches. Each rides in spare CarParams.flags bits and is read
+    # once, when CarState and CarController are constructed, so a change only takes
+    # effect on the next start - every description says so rather than appearing to do
+    # nothing. They are inert on any other platform: the values are only unpacked by
+    # the Ford code, and all-default packs to zero.
+    for param, title, desc, buttons in TRANSIT_LKA_SETTINGS:
+      self._toggles[param] = multiple_button_item(
+        lambda t=title: tr(t),
+        lambda d=desc: tr(d) + " " + tr("Takes effect the next time openpilot starts."),
+        buttons=[(lambda b=b: tr(b)) for b in buttons],
+        button_width=255,
+        callback=lambda index, p=param: self._params.put(p, index, block=True),
+        selected_index=self._params.get(param, return_default=True),
+      )
 
     self._update_experimental_mode_icon()
     self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
