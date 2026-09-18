@@ -10,6 +10,7 @@ from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import interfaces
+from opendbc.car.ford.lane_center_trim import DEFAULT_OFFSET_M, DEFAULT_STRENGTH, lane_center_trim_for
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
@@ -44,6 +45,11 @@ class Controls:
     self.steer_limited_by_safety = False
     self.curvature = 0.0
     self.desired_curvature = 0.0
+
+    # Transit lane-centering trim, ported from BluePilot. None for every other car and
+    # whenever its switch is off, so nothing else pays for it. The algorithm lives in
+    # opendbc with the rest of the Ford code; only the model message it needs is here.
+    self.lane_center_trim = lane_center_trim_for(self.CP)
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -120,6 +126,12 @@ class Controls:
       new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
+    if self.lane_center_trim is not None:
+      # Before clip_curvature, so the trim is subject to the same rate and acceleration
+      # limit as the planner's own curvature rather than bypassing it.
+      new_desired_curvature = self.lane_center_trim.update(
+        new_desired_curvature, model_v2, CS.vEgo, True, DEFAULT_OFFSET_M, DEFAULT_STRENGTH,
+        CC.latActive, model_v2.meta.laneChangeState != LaneChangeState.off)
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 

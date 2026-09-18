@@ -52,6 +52,22 @@ TRANSIT_LKA_SETTINGS = (
             "Experimental and never driven."),
     (tr_noop("Off"), tr_noop("On")),
   ),
+  (
+    "TransitLaneCentering",
+    tr_noop("Transit LKA: lane centering"),
+    tr_noop("Nudges the steering toward the middle of the lane markings instead of following the " +
+            "model's own path. Where the markings are unreliable it falls back to that path rather " +
+            "than to nothing. Aimed at the van sitting right of centre. Experimental."),
+    (tr_noop("Off"), tr_noop("On")),
+  ),
+  (
+    "TransitHumanTurn",
+    tr_noop("Transit LKA: hand back on a held turn"),
+    tr_noop("Stops steering while you hold the wheel through a turn, instead of pushing against " +
+            "you and handing back a stale command when you let go. Needs a sustained hold past " +
+            "45 degrees, so ordinary corrections do not trigger it. Experimental."),
+    (tr_noop("Off"), tr_noop("On")),
+  ),
 )
 
 # Description constants
