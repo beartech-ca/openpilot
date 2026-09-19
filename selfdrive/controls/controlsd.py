@@ -10,7 +10,8 @@ from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import interfaces
-from opendbc.car.ford.lane_center_trim import DEFAULT_OFFSET_M, DEFAULT_STRENGTH, lane_center_trim_for
+from opendbc.car.ford.lane_center_trim import (OFFSET_LIMIT_M, STRENGTH_LIMIT,
+                                               lane_center_trim_for)
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
@@ -50,6 +51,14 @@ class Controls:
     # whenever its switch is off, so nothing else pays for it. The algorithm lives in
     # opendbc with the rest of the Ford code; only the model message it needs is here.
     self.lane_center_trim = lane_center_trim_for(self.CP)
+    # Its two values are re-read while driving, unlike the switches, because they exist to
+    # be tried against the road. Clamped here as well as in the settings widget: Params are
+    # editable by hand and this one reaches the controller.
+    self.lane_center_offset = 0.0
+    self.lane_center_strength = 0.0
+    self.lane_center_frame = 0
+    if self.lane_center_trim is not None:
+      self._read_lane_center_values()
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -64,10 +73,30 @@ class Controls:
     elif self.CP.lateralTuning.which() == 'torque':
       self.LaC = LatControlTorque(self.CP, self.CI, DT_CTRL)
 
+  def _read_lane_center_values(self):
+    def _read(key, limit, default):
+      try:
+        value = float(self.params.get(key, return_default=True))
+      except (TypeError, ValueError):
+        return default
+      if not math.isfinite(value):
+        return default
+      return max(-limit, min(limit, value)) if limit > 0 else default
+
+    self.lane_center_offset = _read("TransitLaneCenterOffset", OFFSET_LIMIT_M, 0.0)
+    self.lane_center_strength = _read("TransitLaneCenterStrength", STRENGTH_LIMIT, 0.0)
+    self.lane_center_strength = max(0.0, self.lane_center_strength)
+
   def update(self):
     self.sm.update(15)
     if self.sm.updated["liveCalibration"]:
       self.pose_calibrator.feed_live_calib(self.sm['liveCalibration'])
+      if self.lane_center_trim is not None:
+        # The model's spatial scale assumes a fixed camera height and modeld never applies the
+        # calibrated one, so the trim needs it to read lane widths in the right units.
+        height = self.sm['liveCalibration'].height
+        if len(height):
+          self.lane_center_trim.set_camera_height(height[0])
     if self.sm.updated["livePose"]:
       device_pose = Pose.from_live_pose(self.sm['livePose'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
@@ -127,11 +156,15 @@ class Controls:
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
     if self.lane_center_trim is not None:
+      self.lane_center_frame += 1
+      if self.lane_center_frame % 200 == 0:  # 2 s at 100 Hz
+        self._read_lane_center_values()
       # Before clip_curvature, so the trim is subject to the same rate and acceleration
       # limit as the planner's own curvature rather than bypassing it.
       new_desired_curvature = self.lane_center_trim.update(
-        new_desired_curvature, model_v2, CS.vEgo, True, DEFAULT_OFFSET_M, DEFAULT_STRENGTH,
-        CC.latActive, model_v2.meta.laneChangeState != LaneChangeState.off)
+        new_desired_curvature, model_v2, CS.vEgo, True, self.lane_center_offset,
+        self.lane_center_strength, CC.latActive,
+        model_v2.meta.laneChangeState != LaneChangeState.off)
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 

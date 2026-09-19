@@ -1,6 +1,8 @@
 from cereal import log
 from openpilot.common.params import Params, UnknownKeyName
 from openpilot.system.ui.widgets import Widget
+from opendbc.car.ford.lane_center_trim import OFFSET_LIMIT_M, STRENGTH_LIMIT
+from openpilot.selfdrive.ui.widgets.number_input import number_item
 from openpilot.system.ui.widgets.list_view import multiple_button_item, toggle_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
@@ -18,30 +20,19 @@ TRANSIT_LKA_SETTINGS = (
     "TransitLkaIntervention",
     tr_noop("Transit LKA: intervention"),
     tr_noop("Which intervention the PSCM is asked for. Standard and Increasing hold one of them; " +
-            "Preset escalates to Increasing only above the angle the recorded drives showed it is needed at."),
-    (tr_noop("Standard"), tr_noop("Increasing"), tr_noop("Preset")),
+            "Preset escalates to Increasing only on large requests. Escalating turned out to move the " +
+            "wheel less, not more - in the recorded drives Standard got 50-60% more travel out of the " +
+            "PSCM at every request size, so Standard is the one to use."),
+    (tr_noop("Standard (recommended)"), tr_noop("Increasing"), tr_noop("Preset")),
   ),
   (
     "TransitLkaRamp",
     tr_noop("Transit LKA: ramp"),
-    tr_noop("How quickly the PSCM applies each request. Slow and Fast hold one of them; " +
-            "Preset switches to Fast on large or fast-changing requests."),
-    (tr_noop("Slow"), tr_noop("Fast"), tr_noop("Preset")),
-  ),
-  (
-    "TransitLkaDirectionSign",
-    tr_noop("Transit LKA: direction sign"),
-    tr_noop("Which way a positive steering request turns the van. Change this only if it steers " +
-            "the wrong way."),
-    (tr_noop("Positive is left"), tr_noop("Positive is right")),
-  ),
-  (
-    "TransitLkaAvailGate",
-    tr_noop("Transit LKA: availability gate"),
-    tr_noop("Which PSCM availability reports count as offering LKA. Below roughly 36 km/h this van " +
-            "reports LKA suppressed and openpilot stops steering; Permissive commands through that " +
-            "report to find out whether the PSCM actually steers there. Experimental."),
-    (tr_noop("Standard"), tr_noop("Permissive"), tr_noop("Any")),
+    tr_noop("How quickly the PSCM applies each request - the car calls the two Smooth and " +
+            "Quick. Slow and Fast hold one of them; Preset switches to Fast on large or " +
+            "fast-changing requests. The stock camera uses Smooth on every frame it ever asks " +
+            "for anything, so Slow is the one to use."),
+    (tr_noop("Slow (recommended)"), tr_noop("Fast"), tr_noop("Preset")),
   ),
   (
     "TransitLkaContinuation",
@@ -49,7 +40,8 @@ TRANSIT_LKA_SETTINGS = (
     tr_noop("Keeps steering after the car cancels cruise at about 18 km/h on the way to a stop. " +
             "Lateral only - openpilot still cannot accelerate or brake there. The van keeps steering " +
             "while your cruise reads off, which is not what you will expect; braking releases it. " +
-            "Experimental and never driven."),
+            "Experimental. Driven on seven recorded routes with no problem seen, but the low-speed " +
+            "behaviour it exists for has not been examined on its own yet."),
     (tr_noop("Off"), tr_noop("On")),
   ),
   (
@@ -57,7 +49,9 @@ TRANSIT_LKA_SETTINGS = (
     tr_noop("Transit LKA: lane centering"),
     tr_noop("Nudges the steering toward the middle of the lane markings instead of following the " +
             "model's own path. Where the markings are unreliable it falls back to that path rather " +
-            "than to nothing. Aimed at the van sitting right of centre. Experimental."),
+            "than to nothing. Aimed at the van sitting right of centre, which the recorded drives " +
+            "confirm: under openpilot the van sat a median 0.11 m right of the lane centre, while " +
+            "under the driver it sat 0.12 m left. Experimental and never switched on."),
     (tr_noop("Off"), tr_noop("On")),
   ),
   (
@@ -65,8 +59,29 @@ TRANSIT_LKA_SETTINGS = (
     tr_noop("Transit LKA: hand back on a held turn"),
     tr_noop("Stops steering while you hold the wheel through a turn, instead of pushing against " +
             "you and handing back a stale command when you let go. Needs a sustained hold past " +
-            "45 degrees, so ordinary corrections do not trigger it. Experimental."),
+            "45 degrees, so ordinary corrections do not trigger it. Experimental and never " +
+            "switched on."),
     (tr_noop("Off"), tr_noop("On")),
+  ),
+)
+
+# param, title, description, min, max, decimals, suffix. These two belong to the lane
+# centering switch above and do nothing while it is off.
+TRANSIT_LANE_CENTERING_VALUES = (
+  (
+    "TransitLaneCenterOffset",
+    tr_noop("Transit LKA: lane offset"),
+    tr_noop("How far off the middle of the lane to sit. Negative is left, positive is right. " +
+            "This is the part that still works where the lane markings do not, so it is what " +
+            "moves the van off a curb or a soft edge."),
+    -OFFSET_LIMIT_M, OFFSET_LIMIT_M, 2, " m",
+  ),
+  (
+    "TransitLaneCenterStrength",
+    tr_noop("Transit LKA: lane centering strength"),
+    tr_noop("How hard the centering pulls. Lower is gentler and slower to correct; 1.00 applies " +
+            "the whole correction the limits already allow. Start low."),
+    0.0, STRENGTH_LIMIT, 2, "",
   ),
 )
 
@@ -207,6 +222,15 @@ class TogglesLayout(Widget):
         button_width=255,
         callback=lambda index, p=param: self._params.put(p, index, block=True),
         selected_index=self._params.get(param, return_default=True),
+      )
+
+    # The two lane-centering values. Unlike the switches these are re-read while driving,
+    # so they say so instead of carrying the restart note.
+    for param, title, desc, lo, hi, decimals, suffix in TRANSIT_LANE_CENTERING_VALUES:
+      self._toggles[param] = number_item(
+        lambda t=title: tr(t),
+        lambda d=desc: tr(d) + " " + tr("Takes effect within a couple of seconds."),
+        param, lo, hi, decimals, suffix,
       )
 
     self._update_experimental_mode_icon()

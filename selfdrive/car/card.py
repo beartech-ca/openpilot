@@ -98,8 +98,6 @@ class Car:
       extra_flags = ford_values.pack_transit_lka_flags(
         self.params.get("TransitLkaIntervention", return_default=True),
         self.params.get("TransitLkaRamp", return_default=True),
-        self.params.get("TransitLkaDirectionSign", return_default=True),
-        self.params.get("TransitLkaAvailGate", return_default=True),
         self.params.get("TransitLkaContinuation", return_default=True),
         self.params.get("TransitLaneCentering", return_default=True),
         self.params.get("TransitHumanTurn", return_default=True),
