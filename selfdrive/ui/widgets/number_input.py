@@ -27,11 +27,13 @@ from openpilot.system.ui.widgets.list_view import (
 
 
 class NumberAction(ItemAction):
-  def __init__(self, param: str, minimum: float, maximum: float, decimals: int = 2, suffix: str = ""):
+  def __init__(self, param: str, minimum: float, maximum: float, default: float,
+               decimals: int = 2, suffix: str = ""):
     super().__init__(BUTTON_WIDTH, True)
     self._param = param
     self._min = minimum
     self._max = maximum
+    self._default = default
     self._decimals = decimals
     self._suffix = suffix
     self._params = Params()
@@ -44,7 +46,7 @@ class NumberAction(ItemAction):
       raw = self._params.get(self._param, return_default=True)
       return float(raw.decode() if isinstance(raw, bytes) else raw)
     except (TypeError, ValueError, AttributeError):
-      return 0.0
+      return self._default
 
   def _label(self) -> str:
     return f"{self._value():.{self._decimals}f}{self._suffix}"
@@ -56,16 +58,25 @@ class NumberAction(ItemAction):
   def _open(self):
     self._keyboard.reset()
     self._keyboard.set_text(f"{self._value():.{self._decimals}f}")
-    self._keyboard.set_title(tr("Enter a value"),
-                             f"{self._min:.{self._decimals}f} to {self._max:.{self._decimals}f}{self._suffix}")
+    # The driver has to be able to get back to the shipped value after trying things on the
+    # road, and there is no reset button on a list row: an empty entry restores it.
+    d = self._decimals
+    subtitle = (f"{self._min:.{d}f} to {self._max:.{d}f}{self._suffix}" +
+                f"  ·  {tr('default')} {self._default:.{d}f}{self._suffix}" +
+                f"  ·  {tr('blank restores it')}")
+    self._keyboard.set_title(tr("Enter a value"), subtitle)
     self._keyboard.set_callback(self._submit)
     gui_app.push_widget(self._keyboard)
 
   def _submit(self, result: DialogResult):
     if result != DialogResult.CONFIRM:
       return
+    text = self._keyboard.text.strip()
+    if not text:
+      self._params.put(self._param, f"{self._default:.{self._decimals}f}")
+      return
     try:
-      value = float(self._keyboard.text.strip())
+      value = float(text)
     except ValueError:
       return  # not a number: leave the stored value alone
     value = max(self._min, min(self._max, value))
@@ -80,7 +91,7 @@ class NumberAction(ItemAction):
     return False
 
 
-def number_item(title, description, param: str, minimum: float, maximum: float,
+def number_item(title, description, param: str, minimum: float, maximum: float, default: float,
                 decimals: int = 2, suffix: str = "") -> ListItem:
   return ListItem(title=title, description=description,
-                  action_item=NumberAction(param, minimum, maximum, decimals, suffix))
+                  action_item=NumberAction(param, minimum, maximum, default, decimals, suffix))

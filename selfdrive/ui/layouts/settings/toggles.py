@@ -1,7 +1,8 @@
 from cereal import log
 from openpilot.common.params import Params, UnknownKeyName
 from openpilot.system.ui.widgets import Widget
-from opendbc.car.ford.lane_center_trim import OFFSET_LIMIT_M, STRENGTH_LIMIT
+from opendbc.car.ford.lane_center_trim import (DEFAULT_OFFSET_M, DEFAULT_STRENGTH,
+                                               OFFSET_LIMIT_M, STRENGTH_LIMIT)
 from openpilot.selfdrive.ui.widgets.number_input import number_item
 from openpilot.system.ui.widgets.list_view import multiple_button_item, toggle_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
@@ -65,23 +66,29 @@ TRANSIT_LKA_SETTINGS = (
   ),
 )
 
-# param, title, description, min, max, decimals, suffix. These two belong to the lane
-# centering switch above and do nothing while it is off.
+# param, title, description, min, max, default, decimals, suffix. These two belong to the
+# lane centering switch above and do nothing while it is off. The defaults come from
+# ford/lane_center_trim.py so the settings screen, the params file and the controller
+# cannot drift apart.
 TRANSIT_LANE_CENTERING_VALUES = (
   (
     "TransitLaneCenterOffset",
     tr_noop("Transit LKA: lane offset"),
     tr_noop("How far off the middle of the lane to sit. Negative is left, positive is right. " +
             "This is the part that still works where the lane markings do not, so it is what " +
-            "moves the van off a curb or a soft edge."),
-    -OFFSET_LIMIT_M, OFFSET_LIMIT_M, 2, " m",
+            "moves the van off a curb or a soft edge. Leave it at 0.00 until centering alone " +
+            "has been driven; if the van still sits right after that, -0.10 is the step to " +
+            "start from. Below about 32 km/h it does nothing."),
+    -OFFSET_LIMIT_M, OFFSET_LIMIT_M, DEFAULT_OFFSET_M, 2, " m",
   ),
   (
     "TransitLaneCenterStrength",
     tr_noop("Transit LKA: lane centering strength"),
     tr_noop("How hard the centering pulls. Lower is gentler and slower to correct; 1.00 applies " +
-            "the whole correction the limits already allow. Start low."),
-    0.0, STRENGTH_LIMIT, 2, "",
+            "the whole correction the limits already allow. Leave it at 0.25 for the first " +
+            "drives - that is what the recorded routes were replayed against - and change the " +
+            "offset before reaching for this."),
+    0.0, STRENGTH_LIMIT, DEFAULT_STRENGTH, 2, "",
   ),
 )
 
@@ -226,11 +233,13 @@ class TogglesLayout(Widget):
 
     # The two lane-centering values. Unlike the switches these are re-read while driving,
     # so they say so instead of carrying the restart note.
-    for param, title, desc, lo, hi, decimals, suffix in TRANSIT_LANE_CENTERING_VALUES:
+    for param, title, desc, lo, hi, default, decimals, suffix in TRANSIT_LANE_CENTERING_VALUES:
       self._toggles[param] = number_item(
         lambda t=title: tr(t),
-        lambda d=desc: tr(d) + " " + tr("Takes effect within a couple of seconds."),
-        param, lo, hi, decimals, suffix,
+        lambda d=desc, dv=default, sfx=suffix, dc=decimals: (
+          tr(d) + " " + tr("Takes effect within a couple of seconds.")
+          + " " + tr("Default") + f" {dv:.{dc}f}{sfx}."),
+        param, lo, hi, default, decimals, suffix,
       )
 
     self._update_experimental_mode_icon()
