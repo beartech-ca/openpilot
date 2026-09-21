@@ -10,8 +10,8 @@ from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import interfaces
-from opendbc.car.ford.lane_center_trim import (OFFSET_LIMIT_M, STRENGTH_LIMIT,
-                                               lane_center_trim_for)
+from opendbc.car.ford.lane_center_trim import (INTEGRAL_LIMIT_PER_S, OFFSET_LIMIT_M,
+                                               STRENGTH_LIMIT, lane_center_trim_for)
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
@@ -85,6 +85,7 @@ class Controls:
 
     self.lane_center_offset = _read("TransitLaneCenterOffset", OFFSET_LIMIT_M, 0.0)
     self.lane_center_strength = _read("TransitLaneCenterStrength", STRENGTH_LIMIT, 0.0)
+    self.lane_center_integral = _read("TransitLaneCenterIntegral", INTEGRAL_LIMIT_PER_S, 0.0)
     self.lane_center_strength = max(0.0, self.lane_center_strength)
 
   def update(self):
@@ -164,7 +165,8 @@ class Controls:
       new_desired_curvature = self.lane_center_trim.update(
         new_desired_curvature, model_v2, CS.vEgo, True, self.lane_center_offset,
         self.lane_center_strength, CC.latActive,
-        model_v2.meta.laneChangeState != LaneChangeState.off)
+        model_v2.meta.laneChangeState != LaneChangeState.off,
+        integral_gain=self.lane_center_integral)
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 

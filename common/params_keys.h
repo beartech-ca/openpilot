@@ -118,9 +118,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TransitLkaContinuation", {PERSISTENT, INT, "0"}},
     {"TransitLaneCentering", {PERSISTENT, INT, "0"}},
     {"TransitHumanTurn", {PERSISTENT, INT, "0"}},
-    // these two must match DEFAULT_OFFSET_M / DEFAULT_STRENGTH in ford/lane_center_trim.py
+    // these three must match DEFAULT_OFFSET_M / DEFAULT_STRENGTH / DEFAULT_INTEGRAL_GAIN
+    // in ford/lane_center_trim.py
     {"TransitLaneCenterOffset", {PERSISTENT, FLOAT, "0.0"}},
     {"TransitLaneCenterStrength", {PERSISTENT, FLOAT, "0.25"}},
+    {"TransitLaneCenterIntegral", {PERSISTENT, FLOAT, "0.03"}},
     {"UbloxAvailable", {PERSISTENT, BOOL}},
     {"UpdateAvailable", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},
     {"UpdateFailedCount", {CLEAR_ON_MANAGER_START, INT}},

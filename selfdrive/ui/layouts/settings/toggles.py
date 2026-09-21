@@ -1,7 +1,8 @@
 from cereal import log
 from openpilot.common.params import Params, UnknownKeyName
 from openpilot.system.ui.widgets import Widget
-from opendbc.car.ford.lane_center_trim import (DEFAULT_OFFSET_M, DEFAULT_STRENGTH,
+from opendbc.car.ford.lane_center_trim import (DEFAULT_INTEGRAL_GAIN, DEFAULT_OFFSET_M,
+                                               DEFAULT_STRENGTH, INTEGRAL_LIMIT_PER_S,
                                                OFFSET_LIMIT_M, STRENGTH_LIMIT)
 from openpilot.selfdrive.ui.widgets.number_input import number_item
 from openpilot.system.ui.widgets.list_view import multiple_button_item, toggle_item
@@ -89,6 +90,16 @@ TRANSIT_LANE_CENTERING_VALUES = (
             "drives - that is what the recorded routes were replayed against - and change the " +
             "offset before reaching for this."),
     0.0, STRENGTH_LIMIT, DEFAULT_STRENGTH, 2, "",
+  ),
+  (
+    "TransitLaneCenterIntegral",
+    tr_noop("Transit LKA: lane centering integral"),
+    tr_noop("How fast the centering builds a standing correction. The strength above cannot " +
+            "remove a lasting bias on its own - it settles somewhere off centre rather than on " +
+            "it - and this is what closes that gap, slowly, over about ten seconds. " +
+            "0 turns it off and leaves the centering purely proportional, which is how to tell " +
+            "the two apart on the road."),
+    0.0, INTEGRAL_LIMIT_PER_S, DEFAULT_INTEGRAL_GAIN, 2, "",
   ),
 )
 
