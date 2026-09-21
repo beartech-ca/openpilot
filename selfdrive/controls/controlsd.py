@@ -86,10 +86,17 @@ class Controls:
         return default
       return max(-limit, min(limit, value)) if limit > 0 else default
 
+    before = (self.lane_center_offset, self.lane_center_strength, self.lane_center_integral)
     self.lane_center_offset = _read("TransitLaneCenterOffset", OFFSET_LIMIT_M, 0.0)
     self.lane_center_strength = _read("TransitLaneCenterStrength", STRENGTH_LIMIT, 0.0)
     self.lane_center_integral = _read("TransitLaneCenterIntegral", INTEGRAL_LIMIT_PER_S, 0.0)
     self.lane_center_strength = max(0.0, self.lane_center_strength)
+    now = (self.lane_center_offset, self.lane_center_strength, self.lane_center_integral)
+    # These are meant to be changed at the roadside and driven against, so the log has to say
+    # which values a stretch of driving was under. Only on a change: they are re-read at 0.5 Hz.
+    if now != before:
+      cloudlog.event("transit_lane_center_settings", offset=now[0], strength=now[1],
+                     integral_gain=now[2])
 
   def update(self):
     self.sm.update(15)
@@ -170,6 +177,10 @@ class Controls:
         self.lane_center_strength, CC.latActive,
         model_v2.meta.laneChangeState != LaneChangeState.off,
         integral_gain=self.lane_center_integral)
+      if CC.latActive and self.lane_center_frame % 20 == 0:   # 5 Hz, engaged only
+        raw, scale, integral, correction = self.lane_center_trim.debug
+        cloudlog.event("transit_lane_center", raw=raw, scale=scale, integral=integral,
+                       correction=correction, v_ego=CS.vEgo)
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
     lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
 
