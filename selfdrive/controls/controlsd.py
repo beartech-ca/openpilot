@@ -5,7 +5,7 @@ from numbers import Number
 from cereal import car, log
 import cereal.messaging as messaging
 from openpilot.common.constants import CV
-from openpilot.common.params import Params
+from openpilot.common.params import Params, UnknownKeyName
 from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog
 
@@ -78,7 +78,9 @@ class Controls:
     def _read(key, limit, default):
       try:
         value = float(self.params.get(key, return_default=True))
-      except (TypeError, ValueError):
+      except (TypeError, ValueError, UnknownKeyName):
+        # UnknownKeyName: params_keys.h is compiled in, so a build that has not caught up
+        # with the source has no such key. Fall back rather than take controlsd down.
         return default
       if not math.isfinite(value):
         return default

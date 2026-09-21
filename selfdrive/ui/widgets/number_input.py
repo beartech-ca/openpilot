@@ -10,7 +10,7 @@ cannot reach the controller: openpilot reads these while driving.
 import pyray as rl
 from collections.abc import Callable
 
-from openpilot.common.params import Params
+from openpilot.common.params import Params, UnknownKeyName
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.widgets import DialogResult
@@ -47,10 +47,14 @@ class NumberAction(ItemAction):
                           border_radius=BUTTON_BORDER_RADIUS, font_size=BUTTON_FONT_SIZE)
 
   def _read(self) -> float:
+    # UnknownKeyName belongs here with the rest: params_keys.h is compiled into
+    # params_pyx, so a source tree whose build has not caught up yet has the row but not
+    # the key. This runs while MainLayout is building every panel, so letting it out takes
+    # the whole UI down at startup rather than showing one row with a stale number.
     try:
       raw = self._params.get(self._param, return_default=True)
       return float(raw.decode() if isinstance(raw, bytes) else raw)
-    except (TypeError, ValueError, AttributeError):
+    except (TypeError, ValueError, AttributeError, UnknownKeyName):
       return self._default
 
   def _value(self) -> float:
@@ -104,7 +108,10 @@ class NumberAction(ItemAction):
     the driver just made.
     """
     value = round(float(value), self._decimals)
-    self._params.put(self._param, value, block=True)
+    try:
+      self._params.put(self._param, value, block=True)
+    except UnknownKeyName:
+      return  # see _read: the build has no such key, so there is nowhere to put it
     self._cached = value
 
   def _render(self, rect: rl.Rectangle) -> bool:
