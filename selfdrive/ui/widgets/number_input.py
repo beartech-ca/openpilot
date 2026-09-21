@@ -37,16 +37,24 @@ class NumberAction(ItemAction):
     self._decimals = decimals
     self._suffix = suffix
     self._params = Params()
-    self._keyboard = Keyboard(min_text_size=1, max_text_size=8)
+    # min_text_size has to be 0: the keyboard disables its confirm key while the text is
+    # shorter than it, so any other value makes the empty entry that restores the default
+    # impossible to submit.
+    self._keyboard = Keyboard(min_text_size=0, max_text_size=8)
+    # _render runs every frame, and Params.get is a file read. Read once and keep it.
+    self._cached = self._read()
     self._button = Button("", click_callback=self._open, button_style=ButtonStyle.LIST_ACTION,
                           border_radius=BUTTON_BORDER_RADIUS, font_size=BUTTON_FONT_SIZE)
 
-  def _value(self) -> float:
+  def _read(self) -> float:
     try:
       raw = self._params.get(self._param, return_default=True)
       return float(raw.decode() if isinstance(raw, bytes) else raw)
     except (TypeError, ValueError, AttributeError):
       return self._default
+
+  def _value(self) -> float:
+    return self._cached
 
   def _label(self) -> str:
     return f"{self._value():.{self._decimals}f}{self._suffix}"
@@ -57,6 +65,10 @@ class NumberAction(ItemAction):
 
   def _open(self):
     self._keyboard.reset()
+    # reset() drops the keyboard back to letters, and every value here is a number. There is
+    # no public way to pick the page; a rename upstream leaves a dead attribute and the
+    # letters page, which is what it does today anyway.
+    self._keyboard._layout_name = "numbers"
     self._keyboard.set_text(f"{self._value():.{self._decimals}f}")
     # The driver has to be able to get back to the shipped value after trying things on the
     # road, and there is no reset button on a list row: an empty entry restores it.
@@ -91,7 +103,9 @@ class NumberAction(ItemAction):
     async write leaves the row showing the previous number for a moment after a change
     the driver just made.
     """
-    self._params.put(self._param, round(float(value), self._decimals), block=True)
+    value = round(float(value), self._decimals)
+    self._params.put(self._param, value, block=True)
+    self._cached = value
 
   def _render(self, rect: rl.Rectangle) -> bool:
     button_rect = rl.Rectangle(rect.x + rect.width - BUTTON_WIDTH, rect.y + (rect.height - BUTTON_HEIGHT) / 2,

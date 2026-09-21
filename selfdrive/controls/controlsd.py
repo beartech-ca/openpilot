@@ -56,6 +56,7 @@ class Controls:
     # editable by hand and this one reaches the controller.
     self.lane_center_offset = 0.0
     self.lane_center_strength = 0.0
+    self.lane_center_integral = 0.0
     self.lane_center_frame = 0
     if self.lane_center_trim is not None:
       self._read_lane_center_values()
