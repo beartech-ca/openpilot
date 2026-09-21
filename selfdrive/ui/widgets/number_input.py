@@ -73,14 +73,25 @@ class NumberAction(ItemAction):
       return
     text = self._keyboard.text.strip()
     if not text:
-      self._params.put(self._param, f"{self._default:.{self._decimals}f}")
+      self._store(self._default)
       return
     try:
       value = float(text)
     except ValueError:
       return  # not a number: leave the stored value alone
-    value = max(self._min, min(self._max, value))
-    self._params.put(self._param, f"{value:.{self._decimals}f}")
+    self._store(max(self._min, min(self._max, value)))
+
+  def _store(self, value: float) -> None:
+    """Write the value as a float, and wait for it.
+
+    These are FLOAT params and Params.put type-checks: handing it the formatted string
+    raises TypeError, which propagates out of the keyboard's callback and closes the
+    dialog without saving - the value simply never took. Blocking matters too, because
+    put is non-blocking by default and the row re-reads the param to redraw itself; an
+    async write leaves the row showing the previous number for a moment after a change
+    the driver just made.
+    """
+    self._params.put(self._param, round(float(value), self._decimals), block=True)
 
   def _render(self, rect: rl.Rectangle) -> bool:
     button_rect = rl.Rectangle(rect.x + rect.width - BUTTON_WIDTH, rect.y + (rect.height - BUTTON_HEIGHT) / 2,
