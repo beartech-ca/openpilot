@@ -428,6 +428,11 @@ class TestTransitInterface:
     ret = _transit_params({}, candidate=CAR.FORD_ESCAPE_MK4, toggles=_transit_toggles(transit_lka_continuation=True))
     assert not ret.safetyConfigs[-1].safetyParam & FordSafetyFlags.LKA_CONTINUATION
 
+  def test_continuation_flag_value_is_pinned(self):
+    # Mirrored as FORD_PARAM_LKA_CONTINUATION in opendbc/safety/modes/ford.h; the two must
+    # stay equal or panda latches on a different bit than openpilot sets.
+    assert FordSafetyFlags.LKA_CONTINUATION == 8
+
   def test_toggles_missing_entirely_read_as_defaults(self):
     # DummyCarController passes starpilot_toggles=None; nothing here may assume the attributes exist
     assert transit_lka_settings_from_toggles(None) == (TransitLkaIntervention.STANDARD, TransitLkaRamp.SLOW)
