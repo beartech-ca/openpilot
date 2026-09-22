@@ -3,7 +3,7 @@
 import copy
 import re
 from dataclasses import dataclass, field, replace
-from enum import Enum, IntFlag
+from enum import Enum, IntEnum, IntFlag
 
 from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
 from opendbc.car.lateral import AngleSteeringLimits
@@ -11,6 +11,7 @@ from opendbc.car.structs import CarParams
 from opendbc.car.docs_definitions import CarFootnote, CarHarness, CarDocs, CarParts, Column
 from opendbc.car.fw_query_definitions import FwQueryConfig, LiveFwVersions, OfflineFwVersions, Request, StdQueries, p16
 from opendbc.car.vin import Vin, is_valid_vin
+from opendbc.car.carlog import carlog
 
 Ecu = CarParams.Ecu
 
@@ -50,6 +51,7 @@ class FordSafetyFlags(IntFlag):
   LONG_CONTROL = 1
   CANFD = 2
   LKA_STEERING = 4
+  LKA_CONTINUATION = 8
 
 
 class FordFlags(IntFlag):
@@ -59,6 +61,86 @@ class FordFlags(IntFlag):
   ALT_STEER_ANGLE = 4
   HEV_CLUSTER_DATA = 8
   HEV_BATTERY_DATA = 16
+
+
+# ---- 2022 Transit MK5, steering through Lane_Assist_Data1 ----------------------------------
+#
+# The PSCM on this van ignores LCA/TJA, so Lane_Assist_Data1 is the steering channel. Three
+# switches select how it is driven. They arrive on starpilot_toggles (see
+# transit_lka_settings_from_toggles below); the state machine that applies them is
+# TransitLkaState in ford/carcontroller.py. The preset thresholds it uses come from 46,577
+# recorded commanded frames across four routes.
+
+
+class TransitLkaIntervention(IntEnum):
+  STANDARD = 0
+  INCREASING = 1
+  PRESET = 2
+
+
+class TransitLkaRamp(IntEnum):
+  SLOW = 0
+  FAST = 1
+  PRESET = 2
+
+
+class TransitLkaContinuation(IntEnum):
+  """Keep steering after the PCM cancels cruise on the way down to a stop.
+
+  The PCM leaves Active for Standby at about 17.8 km/h, panda drops controls_allowed
+  and every command stops - lateral included, even though lateral never goes through
+  the PCM at all. ON latches a continuation from that transition so Lane_Assist_Data1
+  keeps flowing, which is the only way to exercise the PSCM below that speed.
+
+  Lateral only. Longitudinal stays blocked: panda still gates ACCDATA on
+  controls_allowed, and CarController forces it inactive while the latch is held.
+  """
+  OFF = 0
+  ON = 1
+
+
+# Continuation latch thresholds, in m/s off BrakeSysFeatures.Veh_V_ActlBrk. Panda
+# recomputes the same latch from the same signal (safety/modes/ford.h); both sides must
+# agree or one commands while the other blocks, so these are duplicated there verbatim.
+TRANSIT_LKA_CONT_ENTER_SPEED = 7.0       # 25.2 km/h
+TRANSIT_LKA_CONT_EXIT_SPEED_HIGH = 9.0   # 32.4 km/h
+TRANSIT_LKA_CONT_EXIT_SPEED_LOW = 0.5    # 1.8 km/h
+TRANSIT_LKA_CRUISE_STANDBY = 3           # CcStat_D_Actl
+
+# LaActAvail_D_Actl values that count as "the PSCM is offering LKA": 3 LKA_LCA_LDW_Avail
+# and 2 LCA_LKA_Avail_LDW_Suppress. 1 and 0 are the PSCM reporting that it has suppressed
+# LKA; commanding through them does not steer (7843 recorded frames, median wheel movement
+# 0.00 deg, direction agreement 41.9%) and keeps the PSCM suppressed.
+TRANSIT_LKA_AVAIL_VALUES: tuple[int, ...] = (2, 3)
+
+# Driver intervention threshold, Nm. Upstream's 1.0 matches the stock PSCM; this van runs
+# modified PSCM firmware whose own override threshold is 1.5, so 1.0 would have openpilot
+# call the driver "holding" while the PSCM is still steering. Transit only.
+TRANSIT_STEER_DRIVER_ALLOWANCE = 1.5
+
+
+def _coerce_transit_lka_setting(enum_cls: type[IntEnum], value) -> IntEnum:
+  """Coerce a Params-sourced switch to its enum, falling back to member 0.
+
+  A ValueError in CarController.__init__ would kill card, which manager restarts forever;
+  clamp instead and say so.
+  """
+  try:
+    return enum_cls(int(value))
+  except (TypeError, ValueError):
+    default = enum_cls(0)
+    carlog.warning("transit lka: %s=%s is out of range, falling back to %s", enum_cls.__name__, value, default.name)
+    return default
+
+
+def transit_lka_settings_from_toggles(starpilot_toggles) -> tuple[TransitLkaIntervention, TransitLkaRamp]:
+  """The two live switches, read from starpilot_toggles (None and missing attributes read as default)."""
+  return (_coerce_transit_lka_setting(TransitLkaIntervention, getattr(starpilot_toggles, "transit_lka_intervention", 0)),
+          _coerce_transit_lka_setting(TransitLkaRamp, getattr(starpilot_toggles, "transit_lka_ramp", 0)))
+
+
+def transit_lka_continuation_from_toggles(starpilot_toggles) -> bool:
+  return bool(getattr(starpilot_toggles, "transit_lka_continuation", False))
 
 
 class RADAR:
@@ -223,8 +305,15 @@ class CAR(Platforms):
     wmis={'1FT'}, vds_codes={'ER4'}, years={MY_2024},
   )
   FORD_TRANSIT_MK5 = FordLKASteeringPlatformConfig(
-    [FordCarDocs("Ford Transit 2025", "Co-Pilot360 Assist+")],
-    CarSpecs(mass=2068, wheelbase=3.302, steerRatio=16.7),
+    [FordCarDocs("Ford Transit 2022-25", "Lane Keeping Aid")],
+    # 2022 T-350 AWD cargo van, long wheelbase high roof, the van this branch is driven on.
+    # mass 2864 = 3000 kg as driven (owner-reported, tools aboard) minus the 136 kg
+    #   STD_CARGO_KG that interfaces.py adds; the curb weight would understate it by 12%.
+    # wheelbase: owner-confirmed 148 in.
+    # steerRatio 20.9: least-squares fit of yaw-rate curvature against steering angle over
+    #   11,658 samples at 36-86 km/h (r = 0.967) pins steerRatio * wheelbase = 78.43 m.
+    # See dev-notes/2026-09-16-transit-mk5-lka-port-design.md.
+    CarSpecs(mass=2864, wheelbase=3.750, steerRatio=20.9),
   )
 
 

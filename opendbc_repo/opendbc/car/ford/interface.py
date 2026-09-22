@@ -8,7 +8,8 @@ from opendbc.car.ford.carcontroller import CarController
 from opendbc.car.ford.carstate import CarState
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.radar_interface import RadarInterface
-from opendbc.car.ford.values import CarControllerParams, DBC, Ecu, FordFlags, RADAR, FordSafetyFlags
+from opendbc.car.ford.values import (CAR, CarControllerParams, DBC, Ecu, FordFlags, RADAR, FordSafetyFlags,
+                                     transit_lka_continuation_from_toggles)
 from opendbc.car.interfaces import CarInterfaceBase
 
 TransmissionType = structs.CarParams.TransmissionType
@@ -18,6 +19,16 @@ class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
   RadarInterface = RadarInterface
+
+  @classmethod
+  def get_params(cls, candidate, fingerprint, car_fw, alpha_long, is_release, docs, starpilot_toggles):
+    ret = super().get_params(candidate, fingerprint, car_fw, alpha_long, is_release, docs, starpilot_toggles)
+    # Mirrors panda's own gate: ford_lka_continuation_enabled is ford_lka_steering AND the
+    # flag (safety/modes/ford.h). CarState and CarController read it back from here, never
+    # from the toggles, so both sides always agree with panda.
+    if ret.flags & FordFlags.LKA_STEERING and transit_lka_continuation_from_toggles(starpilot_toggles):
+      ret.safetyConfigs[-1].safetyParam |= FordSafetyFlags.LKA_CONTINUATION.value
+    return ret
 
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
@@ -33,7 +44,7 @@ class CarInterface(CarInterfaceBase):
 
     ret.radarUnavailable = Bus.radar not in DBC[candidate]
     ret.steerControlType = structs.CarParams.SteerControlType.angle
-    ret.steerActuatorDelay = 0.05 if ret.flags & FordFlags.LKA_STEERING else 0.22
+    ret.steerActuatorDelay = 0.2 if ret.flags & FordFlags.LKA_STEERING else 0.22
     ret.steerLimitTimer = 1.0
     ret.steerAtStandstill = True
 
@@ -87,9 +98,12 @@ class CarInterface(CarInterfaceBase):
             carlog.error('dashcamOnly: Car lacks required lateral control APIs')
             ret.dashcamOnly = True
 
-    # Auto Transmission: 0x732 ECU or Gear_Shift_by_Wire_FD1
+    # Auto Transmission: 0x732 ECU or Gear_Shift_by_Wire_FD1. Transit MK5 reports neither a
+    # shiftByWire ECU nor 0x5A, but its automatic gearbox is visible as PRND in main-bus 0x176.
     found_ecus = [fw.ecu for fw in car_fw]
-    if Ecu.shiftByWire in found_ecus or 0x5A in fingerprint[CAN.main] or docs:
+    automatic_gearbox = (Ecu.shiftByWire in found_ecus or 0x5A in fingerprint[CAN.main] or docs or
+                         (candidate == CAR.FORD_TRANSIT_MK5 and 0x176 in fingerprint[CAN.main]))
+    if automatic_gearbox:
       ret.transmissionType = TransmissionType.automatic
     else:
       ret.transmissionType = TransmissionType.manual

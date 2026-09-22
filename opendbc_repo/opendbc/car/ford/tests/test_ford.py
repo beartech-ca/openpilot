@@ -335,3 +335,112 @@ def test_hands_free_cluster_status_is_opt_in():
 
   assert regular == expected_regular
   assert hands_free == expected_hands_free
+
+
+from opendbc.car.ford.values import (FordFlags, TRANSIT_LKA_AVAIL_VALUES, TransitLkaContinuation,
+                                     TransitLkaIntervention, TransitLkaRamp,
+                                     transit_lka_continuation_from_toggles, transit_lka_settings_from_toggles)
+from opendbc.car.tests.test_car_interfaces import get_test_starpilot_toggles
+
+TransmissionType = CarParams.TransmissionType
+
+
+def _transit_toggles(**overrides):
+  toggles = get_test_starpilot_toggles()
+  toggles.transit_lka_intervention = 0
+  toggles.transit_lka_ramp = 0
+  toggles.transit_lka_continuation = False
+  for key, value in overrides.items():
+    setattr(toggles, key, value)
+  return toggles
+
+
+def _transit_params(fingerprint_main=None, car_fw=None, candidate=CAR.FORD_TRANSIT_MK5, alpha_long=False, toggles=None):
+  fingerprint = {0: {0x176: 8} if fingerprint_main is None else fingerprint_main, 1: {}, 2: {}}
+  return CarInterface.get_params(candidate, fingerprint, car_fw or [], alpha_long=alpha_long, is_release=True,
+                                 docs=False, starpilot_toggles=toggles or _transit_toggles())
+
+
+class TestTransitFingerprint:
+  # Recorded on the owner's van on 2026-09-16. The ADAS, parkingAdas and engine ECUs also
+  # answered, but their responses are logging-only and never take part in matching.
+  RECORDED = {
+    0x730: b'KK21-14D003-AJ\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+    0x760: b'NK41-2D053-AF\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+    0x706: b'NK3T-14F397-AA\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+    0x764: b'LB5T-14D049-AB\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+  }
+
+  def test_platform_steers_through_lka(self):
+    assert CAR.FORD_TRANSIT_MK5.config.flags & FordFlags.LKA_STEERING
+
+  def test_specs_are_the_owners_van(self):
+    specs = CAR.FORD_TRANSIT_MK5.config.specs
+    assert (specs.mass, specs.wheelbase, specs.steerRatio) == (2864, 3.750, 20.9)
+
+  def test_recorded_firmware_is_listed(self):
+    flat = {}
+    for (_ecu, addr, _sub), versions in FW_VERSIONS[CAR.FORD_TRANSIT_MK5].items():
+      flat.setdefault(addr, []).extend(versions)
+    assert set(flat) == set(self.RECORDED)
+    for addr, fw in self.RECORDED.items():
+      assert fw in flat[addr], f"firmware {fw!r} missing for {hex(addr)}"
+      corrupted = bytes([fw[0] ^ 0xFF]) + fw[1:]
+      assert corrupted not in flat[addr]
+
+
+class TestTransitInterface:
+  @staticmethod
+  def _pscm_asbuilt_fw(tja, lca):
+    fw = bytearray(24)
+    fw[7] = tja
+    fw[8] = lca
+    return CarParams.CarFw(ecu=Ecu.eps, address=ECU_ADDRESSES[Ecu.eps], request=[b'\x22\xDE\x01'], fwVersion=bytes(fw))
+
+  def test_0x176_means_automatic(self):
+    ret = _transit_params({0x176: 8})
+    assert ret.transmissionType == TransmissionType.automatic
+    assert ret.minEnableSpeed == -1
+
+  def test_no_0x176_stays_manual(self):
+    assert _transit_params({}).transmissionType == TransmissionType.manual
+
+  def test_pscm_tja_lca_bytes_do_not_dashcam_an_lka_platform(self):
+    ret = _transit_params(car_fw=[self._pscm_asbuilt_fw(0x01, 0x01)])
+    assert not ret.dashcamOnly
+
+  def test_the_same_bytes_still_dashcam_a_curvature_platform(self):
+    ret = _transit_params({}, car_fw=[self._pscm_asbuilt_fw(0x01, 0x01)], candidate=CAR.FORD_ESCAPE_MK4)
+    assert ret.dashcamOnly
+
+  def test_lka_safety_flag_set(self):
+    assert _transit_params().safetyConfigs[-1].safetyParam & FordSafetyFlags.LKA_STEERING
+
+  def test_steer_actuator_delay_is_blues(self):
+    assert _transit_params().steerActuatorDelay == pytest.approx(0.2)
+
+  @pytest.mark.parametrize("on", [False, True])
+  def test_continuation_toggle_reaches_safety_param(self, on):
+    ret = _transit_params(toggles=_transit_toggles(transit_lka_continuation=on))
+    assert bool(ret.safetyConfigs[-1].safetyParam & FordSafetyFlags.LKA_CONTINUATION) is on
+
+  def test_continuation_never_lands_on_a_curvature_platform(self):
+    ret = _transit_params({}, candidate=CAR.FORD_ESCAPE_MK4, toggles=_transit_toggles(transit_lka_continuation=True))
+    assert not ret.safetyConfigs[-1].safetyParam & FordSafetyFlags.LKA_CONTINUATION
+
+  def test_toggles_missing_entirely_read_as_defaults(self):
+    # DummyCarController passes starpilot_toggles=None; nothing here may assume the attributes exist
+    assert transit_lka_settings_from_toggles(None) == (TransitLkaIntervention.STANDARD, TransitLkaRamp.SLOW)
+    assert transit_lka_continuation_from_toggles(None) is False
+
+  def test_out_of_range_switch_values_fall_back_to_the_default(self):
+    toggles = _transit_toggles(transit_lka_intervention=7, transit_lka_ramp=-1)
+    assert transit_lka_settings_from_toggles(toggles) == (TransitLkaIntervention.STANDARD, TransitLkaRamp.SLOW)
+
+  def test_in_range_values_are_honoured(self):
+    toggles = _transit_toggles(transit_lka_intervention=2, transit_lka_ramp=1)
+    assert transit_lka_settings_from_toggles(toggles) == (TransitLkaIntervention.PRESET, TransitLkaRamp.FAST)
+
+  def test_only_the_reports_that_offer_lka_are_accepted(self):
+    assert TRANSIT_LKA_AVAIL_VALUES == (2, 3)
+    assert int(TransitLkaContinuation.ON) == 1
