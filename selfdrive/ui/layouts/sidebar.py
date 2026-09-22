@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from collections.abc import Callable
 from cereal import log
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.system.athena.config import ATHENA_ENABLED
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, FONT_SCALE
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -37,6 +38,16 @@ class Colors:
   METRIC_BORDER = rl.Color(255, 255, 255, 85)
   BUTTON_NORMAL = rl.WHITE
   BUTTON_PRESSED = rl.Color(255, 255, 255, 166)
+
+
+def connection_status(last_ping: int, now_ns: int, athena_enabled: bool = ATHENA_ENABLED) -> tuple[str, str, rl.Color]:
+  if not athena_enabled:
+    return tr_noop("CONNECT"), tr_noop("DISABLED"), Colors.GRAY
+  if last_ping == 0:
+    return tr_noop("CONNECT"), tr_noop("OFFLINE"), Colors.WARNING
+  if now_ns - last_ping < 80_000_000_000:
+    return tr_noop("CONNECT"), tr_noop("ONLINE"), Colors.GOOD
+  return tr_noop("CONNECT"), tr_noop("ERROR"), Colors.DANGER
 
 
 NETWORK_TYPES = {
@@ -127,13 +138,7 @@ class Sidebar(Widget):
       self._temp_status.update(tr_noop("TEMP"), tr_noop("HIGH"), Colors.DANGER)
 
   def _update_connection_status(self, device_state):
-    last_ping = device_state.lastAthenaPingTime
-    if last_ping == 0:
-      self._connect_status.update(tr_noop("CONNECT"), tr_noop("OFFLINE"), Colors.WARNING)
-    elif time.monotonic_ns() - last_ping < 80_000_000_000:  # 80 seconds in nanoseconds
-      self._connect_status.update(tr_noop("CONNECT"), tr_noop("ONLINE"), Colors.GOOD)
-    else:
-      self._connect_status.update(tr_noop("CONNECT"), tr_noop("ERROR"), Colors.DANGER)
+    self._connect_status.update(*connection_status(device_state.lastAthenaPingTime, time.monotonic_ns()))
 
   def _update_panda_status(self):
     if ui_state.panda_type == log.PandaState.PandaType.unknown:

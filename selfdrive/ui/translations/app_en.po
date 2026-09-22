@@ -178,6 +178,18 @@ msgid "Device"
 msgstr "Device"
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Disable"
+msgstr "Disable"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Disable Driver Monitoring"
+msgstr "Disable Driver Monitoring"
+
+#: openpilot/selfdrive/ui/layouts/sidebar.py
+msgid "DISABLED"
+msgstr "DISABLED"
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Disengage on Accelerator Pedal"
 msgstr "Disengage on Accelerator Pedal"
 
@@ -196,6 +208,10 @@ msgstr "Disengage to Reset Calibration"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Display speed in km/h instead of mph."
 msgstr "Display speed in km/h instead of mph."
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Disables driver monitoring and driver-camera recording. The physical camera remains active, but its frames are not analyzed or saved. You must stay attentive and remain responsible for safe operation. Changing this setting restarts the onroad processes."
+msgstr "Disables driver monitoring and driver-camera recording. The physical camera remains active, but its frames are not analyzed or saved. You must stay attentive and remain responsible for safe operation. Changing this setting restarts the onroad processes."
 
 #: openpilot/selfdrive/ui/layouts/settings/device.py
 msgid "Dongle ID"
@@ -822,4 +838,3 @@ msgstr "✓ SUBSCRIBED"
 #: openpilot/selfdrive/ui/widgets/setup.py
 msgid "🔥 Firehose Mode 🔥"
 msgstr "🔥 Firehose Mode 🔥"
-

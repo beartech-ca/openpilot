@@ -361,6 +361,10 @@ msgid "OFFLINE"
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/sidebar.py
+msgid "DISABLED"
+msgstr ""
+
+#: openpilot/selfdrive/ui/layouts/sidebar.py
 msgid "Unknown"
 msgstr ""
 
@@ -710,6 +714,10 @@ msgid "Enable driver monitoring even when openpilot is not engaged."
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Disables driver monitoring and driver-camera recording. The physical camera remains active, but its frames are not analyzed or saved. You must stay attentive and remain responsible for safe operation. Changing this setting restarts the onroad processes."
+msgstr ""
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Upload data from the driver facing camera and help improve the driver monitoring algorithm."
 msgstr ""
 
@@ -754,6 +762,10 @@ msgid "Always-On Driver Monitoring"
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Disable Driver Monitoring"
+msgstr ""
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Record and Upload Driver Camera"
 msgstr ""
 
@@ -763,6 +775,10 @@ msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Use Metric System"
+msgstr ""
+
+#: openpilot/selfdrive/ui/layouts/settings/toggles.py
+msgid "Disable"
 msgstr ""
 
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
@@ -820,4 +836,3 @@ msgstr ""
 #: openpilot/selfdrive/ui/onroad/alert_renderer.py
 msgid "Reboot Device"
 msgstr ""
-

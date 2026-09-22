@@ -6,7 +6,7 @@ import time
 from cereal import car
 from openpilot.common.params import Params
 import openpilot.system.manager.manager as manager
-from openpilot.system.manager.process import ensure_running
+from openpilot.system.manager.process import DaemonProcess, ensure_running
 from openpilot.system.manager.process_config import managed_processes, procs
 from openpilot.system.hardware import HARDWARE
 
@@ -37,6 +37,35 @@ class TestManager:
   def test_blacklisted_procs(self):
     # TODO: ensure there are blacklisted procs until we have a dedicated test
     assert len(BLACKLIST_PROCS), "No blacklisted procs to test not_run"
+
+  def test_athena_is_disabled(self):
+    assert not managed_processes["manage_athenad"].enabled
+
+  def test_disabled_daemon_stops_validated_stale_process(self, mocker):
+    daemon = DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid", enabled=False)
+    params = mocker.MagicMock()
+    params.get.return_value = "123"
+    daemon.params = params
+    mocker.patch("builtins.open", mocker.mock_open(read_data="python\0-m\0system.athena.manage_athenad"))
+    kill = mocker.patch("openpilot.system.manager.process.os.kill")
+
+    daemon.stop(block=False)
+
+    assert kill.call_args_list == [mocker.call(123, 0), mocker.call(123, signal.SIGTERM)]
+    params.remove.assert_called_once_with("AthenadPid")
+
+  def test_disabled_daemon_does_not_signal_unrelated_pid(self, mocker):
+    daemon = DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid", enabled=False)
+    params = mocker.MagicMock()
+    params.get.return_value = "123"
+    daemon.params = params
+    mocker.patch("builtins.open", mocker.mock_open(read_data="python\0-m\0unrelated.module"))
+    kill = mocker.patch("openpilot.system.manager.process.os.kill")
+
+    daemon.stop(block=False)
+
+    kill.assert_called_once_with(123, 0)
+    params.remove.assert_called_once_with("AthenadPid")
 
   def test_set_params_with_default_value(self):
     params = Params()

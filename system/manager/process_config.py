@@ -4,6 +4,7 @@ import platform
 
 from cereal import car
 from openpilot.common.params import Params
+from openpilot.system.athena.config import ATHENA_ENABLED
 from openpilot.system.hardware import PC, TICI
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
 
@@ -65,7 +66,14 @@ def and_(*fns):
   return lambda *args: operator.and_(*(fn(*args) for fn in fns))
 
 procs = [
-  DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
+  # athenad holds a websocket open to comma and answers uploadFileToUrl /
+  # uploadFilesToUrls with any path on the device, which is a second route off this
+  # machine that the uploader's own block does not cover: these logs carry the owner's
+  # VIN, route history and raw camera footage, and this fork is not part of comma's
+  # fleet. Stopping it costs the connect.comma.ai listing and nothing else - the only
+  # consumer of its ping is the sidebar's connectivity dot (ui/layouts/sidebar.py),
+  # which raises no alert and does not gate engagement. Device access is by direct ssh.
+  DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid", enabled=ATHENA_ENABLED),
 
   NativeProcess("loggerd", "system/loggerd", ["./loggerd"], logging),
   NativeProcess("encoderd", "system/loggerd", ["./encoderd"], only_onroad),

@@ -8,6 +8,7 @@ from openpilot.common.api import api_get
 from openpilot.common.params import Params
 from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
+from openpilot.system.athena.config import ATHENA_ENABLED
 from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
 from openpilot.selfdrive.ui.lib.api_helpers import get_token
 
@@ -47,6 +48,9 @@ class PrimeState:
     return PrimeType.UNKNOWN
 
   def _fetch_prime_status(self) -> None:
+    if not ATHENA_ENABLED:
+      return
+
     dongle_id = self._params.get("DongleId")
     if not dongle_id or dongle_id == UNREGISTERED_DONGLE_ID:
       return
@@ -82,6 +86,8 @@ class PrimeState:
         time.sleep(self.SLEEP_INTERVAL)
 
   def start(self) -> None:
+    if not ATHENA_ENABLED:
+      return
     if self._thread and self._thread.is_alive():
       return
     self._running = True
