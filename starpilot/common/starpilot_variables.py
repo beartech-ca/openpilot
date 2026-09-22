@@ -16,6 +16,7 @@ from cereal import car, custom, log
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.chrysler.values import JEEPS as CHRYSLER_JEEPS
+from opendbc.car.ford.values import CAR as FORD_CAR
 from opendbc.car.gm.values import CAR as GM_CAR, EV_CAR as GM_EV_CAR, GM_AUTO_HOLD_CARS, GMFlags
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR, EV_CAR as HYUNDAI_EV_CAR, HyundaiFlags, HyundaiStarPilotSafetyFlags
 from opendbc.car.interfaces import TORQUE_SUBSTITUTE_PATH, CarInterfaceBase, GearShifter
@@ -799,6 +800,10 @@ class StarPilotVariables:
     toggle.lane_centering_e2e_authority = self.get_value(
       "LaneCenteringE2EAuthority", cast=float, condition=toggle.lane_centering,
       default=1.0, min=0.0, max=1.0,
+    )
+    toggle.lane_centering_integral_gain = self.get_value(
+      "LaneCenteringIntegralGain", cast=float, condition=toggle.lane_centering,
+      default=0.03, min=0.0, max=0.2,
     )
 
     advanced_longitudinal_tuning = toggle.openpilot_longitudinal and self.get_value("AdvancedLongitudinalTune")
@@ -1600,6 +1605,15 @@ class StarPilotVariables:
       "TeslaCoopSteering",
       condition=toggle.car_make == "tesla" and toggle.car_model == TESLA_CAR.TESLA_MODEL_3,
     )
+
+    # 2022 Transit MK5 LKA switches. They only mean anything on that platform, so every
+    # other car reads the shipped default. Intervention and ramp are live; continuation
+    # is consumed once at startup through CarParams.safetyConfigs (see ford/interface.py).
+    is_transit = toggle.car_make == "ford" and toggle.car_model == FORD_CAR.FORD_TRANSIT_MK5
+    toggle.transit_lka_intervention = self.get_value("TransitLkaIntervention", cast=int, condition=is_transit, default=0, min=0, max=2)
+    toggle.transit_lka_ramp = self.get_value("TransitLkaRamp", cast=int, condition=is_transit, default=0, min=0, max=2)
+    toggle.transit_lka_continuation = self.get_value("TransitLkaContinuation", condition=is_transit)
+
     toggle.tesla_wake_on_can = self.get_value(
       "TeslaWakeOnCAN",
       condition=toggle.car_make == "tesla" and toggle.car_model in {TESLA_CAR.TESLA_MODEL_3, TESLA_CAR.TESLA_MODEL_Y, TESLA_CAR.TESLA_MODEL_X},
