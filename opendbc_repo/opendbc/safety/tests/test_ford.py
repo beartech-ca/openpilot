@@ -690,8 +690,9 @@ class TestFordTransitLkaSafety(TestFordSafetyBase):
   def _lka_heartbeat_msg(self):
     # The worst case the safety has to accept when nothing is steering: an all-zero
     # payload, in which raw zero in LaRefAng_No_Req decodes to -102.4 mrad, not 0. It is
-    # what fordcan.create_lka_msg sends on every other Ford platform; the Transit's own
-    # inactive frame (create_transit_lka_msg) packs the value 0.0 explicitly instead.
+    # what starpilot/car/ford/fordcan.py's create_lka_msg sends on every other Ford
+    # platform; the Transit's own inactive frame (create_transit_lka_msg, in
+    # opendbc/car/ford/fordcan.py) packs the value 0.0 explicitly instead.
     return self.packer.make_can_msg_safety("Lane_Assist_Data1", 0, {})
 
   # LCA/TJA message. The PSCM ignores it on this platform, but openpilot still sends it
