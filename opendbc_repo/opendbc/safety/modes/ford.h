@@ -210,7 +210,7 @@ static void ford_rx_hook(const CANPacket_t *msg) {
     if ((msg->addr == FORD_SteeringPinion_Data) && ford_lka_steering) {
       // Signal: StePinComp_An_Est : 22|15@0+ (0.1,-1600) degrees -> tenths of a degree,
       // matching FORD_LKA_DEG_TO_CAN in ford_tx_hook
-      const int pinion_angle = (((msg->data[2] & 0x7FU) << 8) | msg->data[3]) - 16000U;
+      const int pinion_angle = (int)(((msg->data[2] & 0x7FU) << 8) | msg->data[3]) - 16000;
       update_sample(&angle_meas, pinion_angle);
     }
 

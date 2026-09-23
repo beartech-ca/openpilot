@@ -910,6 +910,17 @@ class TestFordTransitLkaSafety(TestFordSafetyBase):
       assert self._rx(self._pinion_angle_msg(0.))
       assert self.safety.get_controls_allowed()
 
+  def test_pinion_angle_decode_at_negative_angles(self):
+    # Finding 3 (MISRA 10.3/10.8): the raw StePinComp_An_Est extraction used to subtract
+    # an unsigned 16000U offset and rely on an implementation-defined conversion back to
+    # int. Every raw value below 16000, i.e. every negative angle, exercised that wrap.
+    # Pin the actual decoded value here rather than only a downstream bound outcome.
+    for angle_deg, expected_tenths in ((-30.0, -300), (-160.0, -1600), (-0.1, -1)):
+      self._reset_pinion_measurement(angle_deg)
+      with self.subTest(angle_deg=angle_deg):
+        self.assertEqual(self.safety.get_angle_meas_min(), expected_tenths)
+        self.assertEqual(self.safety.get_angle_meas_max(), expected_tenths)
+
   def test_lateral_motion_control_2_is_gated_on_canfd_lka(self):
     # No platform sets both LKA_STEERING and CANFD today, but ford_init accepts the
     # combination, and LateralMotionControl2 would then run a curvature check against a
