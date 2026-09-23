@@ -78,6 +78,7 @@ class LaneCenteringController:
       return model_curvature
 
     if pause_on_signal and turn_signal_active:
+      # _integral is held across this fade too; see the confidence-loss branch below for why.
       self._correction = float(smooth_value(0.0, self._correction, _SIGNAL_RELEASE_TAU, dt=DT_CTRL))
       self.debug = (0.0, False, self._integral, self._correction)
       return model_curvature + self._correction
@@ -97,6 +98,14 @@ class LaneCenteringController:
       float(np.clip(e2e_authority, 0.0, 1.0)),
     )
     if not valid:
+      # _integral is deliberately held here, not reset: it accumulates a vehicle-borne standing
+      # pull, and a lane-line dropout says nothing about whether that pull is still there.
+      # Resetting on every dropout would force a 13-40 s re-learn (at 0.3-0.1 m of error) each
+      # time, so the term would rarely reach useful authority. This is not the proportional
+      # path's fade-on-output behavior: before this change the controller carried no persistent
+      # state at all, and _correction fades here because it is an output being released, while
+      # the proportional contribution itself is recomputed from scratch every frame. _integral is
+      # this controller's first piece of carried state.
       self._correction = float(smooth_value(0.0, self._correction, _CONFIDENCE_RELEASE_TAU, dt=DT_CTRL))
       self.debug = (0.0, False, self._integral, self._correction)
       return model_curvature + self._correction

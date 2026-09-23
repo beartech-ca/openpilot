@@ -3,7 +3,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.controls.lib.lane_centering import LaneCenteringController, get_lane_centering_visual_direction
+from openpilot.common.realtime import DT_CTRL
+from openpilot.selfdrive.controls.lib.lane_centering import (
+  LaneCenteringController,
+  _SMOOTH_TAU,
+  get_lane_centering_visual_direction,
+)
 
 
 _V_EGO = 20.0
@@ -264,6 +269,55 @@ def test_e2e_break_in_scales_the_integrated_error_too():
   lane, _ = _integrate(model, 300, authority=0.0)
   e2e, _ = _integrate(model, 300, authority=1.0)
   assert 0.0 <= e2e.integral < lane.integral
+
+
+def test_integral_is_held_not_reset_across_confidence_loss():
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  held = controller.integral
+  assert held > 0.0
+
+  low_confidence = _model(left=-1.5, right=2.1, lane_prob=0.3)
+  for _ in range(50):
+    controller.update(0.0, low_confidence, _V_EGO, True, 0.0, 0.0, True, True,
+                      False, False, False, integral_gain=_GAIN)
+  assert controller.integral == held
+
+
+def test_integral_is_held_not_reset_across_turn_signal_pause():
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  held = controller.integral
+  assert held > 0.0
+
+  for _ in range(50):
+    controller.update(0.0, model, _V_EGO, True, 0.0, 0.0, True, True,
+                      True, True, False, integral_gain=_GAIN)
+  assert controller.integral == held
+
+
+def test_resume_from_confidence_loss_is_a_ramp_not_a_step():
+  # A held integral means the target the correction is chasing is unchanged across the fade, so
+  # on the frame the fade ends the correction should move toward that target by exactly one
+  # smooth_value step (alpha = 1 - exp(-DT_CTRL/_SMOOTH_TAU)), not jump straight to it.
+  model = _model(left=-1.5, right=2.1)
+  controller, steady = _integrate(model, 2000)  # let the smoothed correction fully converge
+
+  low_confidence = _model(left=-1.5, right=2.1, lane_prob=0.3)
+  faded = steady
+  for _ in range(50):
+    faded = controller.update(0.0, low_confidence, _V_EGO, True, 0.0, 0.0, True, True,
+                              False, False, False, integral_gain=_GAIN)
+  assert 0.0 <= faded < steady
+
+  resumed = controller.update(0.0, model, _V_EGO, True, 0.0, 0.0, True, True,
+                              False, False, False, integral_gain=_GAIN)
+
+  alpha = 1 - np.exp(-DT_CTRL / _SMOOTH_TAU)
+  gap = steady - faded
+  move = resumed - faded
+  assert move == pytest.approx(alpha * gap, rel=1e-6, abs=1e-9)
+  assert 0.0 < move <= alpha * gap + 1e-9
 
 
 def test_driver_override_clears_the_integral():
