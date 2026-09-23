@@ -7,6 +7,7 @@ from pathlib import Path
 from openpilot.system.hardware.hw import Paths
 
 from openpilot.common.swaglog import cloudlog
+import openpilot.system.loggerd.uploader as uploader
 from openpilot.system.loggerd.uploader import clear_locks, main, UPLOAD_ATTR_NAME, UPLOAD_ATTR_VALUE
 from openpilot.system.loggerd.xattr_cache import getxattr
 
@@ -38,6 +39,25 @@ cloudlog.addHandler(log_handler)
 
 def test_clear_locks_missing_root(tmp_path):
   clear_locks(str(tmp_path / "missing"))
+
+
+def test_do_upload_blocked_never_reaches_network(mocker):
+  # Every existing test in this file runs with uploader.fake_upload = True
+  # (loggerd_tests_common.UploaderTestCase.setup_method), which exercises do_upload's
+  # fake_upload branch -- still calling self.api.get. The real, on-device branch at
+  # system/loggerd/uploader.py:154-160 that answers 412 without touching the network is
+  # covered by no test. Exercise it directly here with fake_upload false.
+  mocker.patch.object(uploader, "fake_upload", False)
+  mock_api = mocker.MagicMock()
+  mocker.patch.object(uploader, "Api", return_value=mock_api)
+  requests_put = mocker.patch.object(uploader.requests, "put")
+
+  up = uploader.Uploader("0000000000000000", "/tmp/does-not-matter")
+  response = up.do_upload("0000000000000000/qlog.zst", "/tmp/does-not-matter/qlog.zst")
+
+  assert response.status_code == 412
+  mock_api.get.assert_not_called()
+  requests_put.assert_not_called()
 
 
 class TestUploader(UploaderTestCase):
