@@ -45,14 +45,15 @@ class FordStockCruiseButton:
 # lateral block this fork's Transit MK5 (its only LKA_STEERING platform) replaced with
 # create_transit_lka_msg, so neither function is reached here. The 13 curvature Ford
 # platforms this fork tracks from StarPilot still call the equivalent limiting in
-# starpilot/car/ford/lateral.py:382-388; deleting these would widen every future merge
-# conflict against that upstream for no local benefit. The Transit's own request is bounded
-# instead by the +-5.8 deg clip in create_transit_lka_msg (fordcan.py:66-67).
+# FordLateralController.update (starpilot/car/ford/lateral.py) via CarControllerParams.CURVATURE_ERROR;
+# deleting these would widen every future merge conflict against that upstream for no local benefit.
+# The Transit's own request is bounded instead by LKA_MAX_ANGLE_DEG in create_transit_lka_msg.
 def apply_ford_angle(desired_angle_deg: float, current_angle_deg: float) -> float:
   relative_angle = desired_angle_deg - current_angle_deg
   return float(np.clip(relative_angle, -5.8, 5.8))
 
 
+# Retained unused for upstream-merge parity: not reached on this fork's LKA_STEERING platform.
 def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_curvature, v_ego_raw, steering_angle, lat_active, CP):
   # No blending at low speed due to lack of torque wind-up and inaccurate current curvature
   if v_ego_raw > 9:
