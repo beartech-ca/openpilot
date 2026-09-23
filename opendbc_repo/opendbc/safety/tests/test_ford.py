@@ -12,8 +12,8 @@ import pytest
 import opendbc.safety.tests.common as common
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY
 from opendbc.car.ford.carcontroller import AVERAGE_ROAD_ROLL, MAX_LATERAL_ACCEL
-from opendbc.car.ford.values import (FordSafetyFlags, TRANSIT_LKA_CONT_ENTER_SPEED, TRANSIT_LKA_CONT_EXIT_SPEED_HIGH,
-                                     TRANSIT_LKA_CONT_EXIT_SPEED_LOW)
+from opendbc.car.ford.values import (CAR, FordSafetyFlags, TRANSIT_LKA_CONT_ENTER_SPEED,
+                                     TRANSIT_LKA_CONT_EXIT_SPEED_HIGH, TRANSIT_LKA_CONT_EXIT_SPEED_LOW)
 from opendbc.car.lateral import ISO_LATERAL_ACCEL
 from opendbc.car.structs import CarParams
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -985,6 +985,27 @@ class TestFordTransitLkaSafety(TestFordSafetyBase):
     self.assertIsNotNone(m, "FORD_PARAM_LKA_CONTINUATION not found in ford.h")
     self.assertEqual(int(m.group(1)), FordSafetyFlags.LKA_CONTINUATION)
 
+  def test_geometry_constants_match_car_side(self):
+    """FORD_LKA_STEERING_PARAMS restates the Transit's steer ratio and wheelbase in ford.h
+    (C can't import CarSpecs), and nothing else detects the two going out of step. values.py
+    (near CAR.FORD_TRANSIT_MK5) records that the committed wheelbase (3.750) is not the
+    measured one (3.759): steerRatio is the fitted partner of that exact wheelbase, so if the
+    wheelbase is ever corrected to the measured value, steerRatio must move with it, and
+    nothing but this test would notice panda silently being left on the old pair. Same
+    technique as test_continuation_constants_match_car_side: parse the literals straight out
+    of ford.h and check them against CarSpecs, the actual source of truth.
+    """
+    ford_h = (pathlib.Path(__file__).parents[1] / "modes" / "ford.h").read_text()
+
+    def _c_field_float(name):
+      m = re.search(rf"\.{name}\s*=\s*([0-9.]+)\s*,", ford_h)
+      self.assertIsNotNone(m, f"{name} not found in FORD_LKA_STEERING_PARAMS")
+      return float(m.group(1))
+
+    specs = CAR.FORD_TRANSIT_MK5.config.specs
+    self.assertEqual(_c_field_float("steer_ratio"), specs.steerRatio)
+    self.assertEqual(_c_field_float("wheelbase"), specs.wheelbase)
+
 
 TRANSIT_LOGS = os.environ.get("TRANSIT_LOGS", "")
 
@@ -1222,8 +1243,10 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
     """Engage normally, then reproduce the PCM's Active -> Standby cancel at low speed."""
     self._feed(self.CRUISE_ACTIVE, 12.0)
     assert self.safety.get_controls_allowed()
-    self._feed(self.CRUISE_ACTIVE, 5.2)
-    self._feed(self.CRUISE_STANDBY, 4.5)
+    # Both derived from CONT_ENTER_SPEED so raising the entry threshold is caught here
+    # too, not just by test_continuation_constants_match_car_side / _geometry_constants_.
+    self._feed(self.CRUISE_ACTIVE, self.CONT_ENTER_SPEED - 1.8)
+    self._feed(self.CRUISE_STANDBY, self.CONT_ENTER_SPEED - 2.5)
     assert not self.safety.get_controls_allowed(), "the cancel must still drop controls_allowed"
 
   def test_lka_survives_the_cancel(self):
@@ -1232,7 +1255,8 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
 
   def test_lka_still_steers_down_to_walking_pace(self):
     self._decelerate_into_standby()
-    for speed in (4.0, 3.0, 2.0, 1.0, 0.6):
+    # The last step is derived from CONT_EXIT_SPEED_LOW so raising it is caught here too.
+    for speed in (4.0, 3.0, 2.0, 1.0, self.CONT_EXIT_SPEED_LOW + 0.1):
       self._feed(self.CRUISE_STANDBY, speed)
       assert self._steers(), f"steering blocked at {speed} m/s"
 
@@ -1267,9 +1291,10 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
     assert not self._steers(), "latched without ever having been engaged"
 
   def test_does_not_arm_when_the_cancel_happens_at_speed(self):
-    self._feed(self.CRUISE_ACTIVE, 20.0)
+    above_entry = self.CONT_ENTER_SPEED + 13.0  # derived so raising the threshold is still caught
+    self._feed(self.CRUISE_ACTIVE, above_entry)
     assert self.safety.get_controls_allowed()
-    self._feed(self.CRUISE_STANDBY, 20.0)  # above the entry threshold
+    self._feed(self.CRUISE_STANDBY, above_entry)
     assert not self._steers(), "latched on a cancel that was not the low-speed one"
 
   def test_brake_releases_it(self):
@@ -1287,7 +1312,7 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
   def test_stopping_releases_it(self):
     self._decelerate_into_standby()
     assert self._steers()
-    self._feed(self.CRUISE_STANDBY, 0.2)
+    self._feed(self.CRUISE_STANDBY, self.CONT_EXIT_SPEED_LOW - 0.3)
     assert not self._steers(), "latch survived coming to a stop"
 
   def test_cruise_switched_off_releases_it(self):
