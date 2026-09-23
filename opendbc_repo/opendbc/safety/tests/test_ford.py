@@ -1261,13 +1261,20 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
     return self._tx(self._lka_angle_msg(2, 1.0))
 
   def _decelerate_into_standby(self):
-    """Engage normally, then reproduce the PCM's Active -> Standby cancel at low speed."""
+    """Engage normally, then reproduce the PCM's Active -> Standby cancel at low speed.
+
+    These speeds are plain literals, not expressions derived from CONT_ENTER_SPEED: a
+    derived expression that reproduces the old literal exactly (e.g. CONT_ENTER_SPEED
+    - 2.5) *follows* a threshold change instead of failing on it, since both the speed
+    fed here and the limit checked in ford.h would move together. Dedicated tripwire
+    tests below (test_latch_entry_speed_is_tightly_bracketed and friends) exist
+    specifically to catch a threshold move in either direction; this helper just needs
+    realistic, stable numbers that latch under the *current* constants.
+    """
     self._feed(self.CRUISE_ACTIVE, 12.0)
     assert self.safety.get_controls_allowed()
-    # Both derived from CONT_ENTER_SPEED so raising the entry threshold is caught here
-    # too, not just by test_continuation_constants_match_car_side / _geometry_constants_.
-    self._feed(self.CRUISE_ACTIVE, self.CONT_ENTER_SPEED - 1.8)
-    self._feed(self.CRUISE_STANDBY, self.CONT_ENTER_SPEED - 2.5)
+    self._feed(self.CRUISE_ACTIVE, 5.2)
+    self._feed(self.CRUISE_STANDBY, 4.5)
     assert not self.safety.get_controls_allowed(), "the cancel must still drop controls_allowed"
 
   def test_lka_survives_the_cancel(self):
@@ -1276,8 +1283,7 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
 
   def test_lka_still_steers_down_to_walking_pace(self):
     self._decelerate_into_standby()
-    # The last step is derived from CONT_EXIT_SPEED_LOW so raising it is caught here too.
-    for speed in (4.0, 3.0, 2.0, 1.0, self.CONT_EXIT_SPEED_LOW + 0.1):
+    for speed in (4.0, 3.0, 2.0, 1.0, 0.6):
       self._feed(self.CRUISE_STANDBY, speed)
       assert self._steers(), f"steering blocked at {speed} m/s"
 
@@ -1312,11 +1318,53 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
     assert not self._steers(), "latched without ever having been engaged"
 
   def test_does_not_arm_when_the_cancel_happens_at_speed(self):
-    above_entry = self.CONT_ENTER_SPEED + 13.0  # derived so raising the threshold is still caught
+    above_entry = 20.0
     self._feed(self.CRUISE_ACTIVE, above_entry)
     assert self.safety.get_controls_allowed()
     self._feed(self.CRUISE_STANDBY, above_entry)
     assert not self._steers(), "latched on a cancel that was not the low-speed one"
+
+  def test_latch_entry_speed_is_tightly_bracketed(self):
+    """Tripwire for FORD_LKA_CONT_ENTER_SPEED itself: latches just below it, does not
+    latch just above it. Unlike deriving _decelerate_into_standby's own speeds from the
+    constant (which only ever reproduces the old literal and so follows a threshold
+    move instead of catching it), asserting opposite outcomes on either side of the
+    constant means a move in either direction fails one half of this bracket.
+    """
+    assert self.CONT_ENTER_SPEED > 0.1, "bracket needs headroom below CONT_ENTER_SPEED to stay a positive speed"
+    for speed, should_latch in ((self.CONT_ENTER_SPEED - 0.1, True), (self.CONT_ENTER_SPEED + 0.1, False)):
+      self.setUp()
+      self._feed(self.CRUISE_ACTIVE, 12.0)
+      assert self.safety.get_controls_allowed()
+      self._feed(self.CRUISE_STANDBY, speed)
+      with self.subTest(speed=speed):
+        self.assertEqual(should_latch, self._steers())
+
+  def test_latch_exit_speed_low_is_tightly_bracketed(self):
+    """Same tripwire shape for the low-speed exit: still latched just above
+    CONT_EXIT_SPEED_LOW, released just below it.
+    """
+    assert self.CONT_EXIT_SPEED_LOW > 0.1, \
+      "bracket needs headroom above zero below CONT_EXIT_SPEED_LOW to stay a positive speed"
+    self._decelerate_into_standby()
+    assert self._steers()
+    self._feed(self.CRUISE_STANDBY, self.CONT_EXIT_SPEED_LOW + 0.1)
+    assert self._steers(), f"released above CONT_EXIT_SPEED_LOW ({self.CONT_EXIT_SPEED_LOW})"
+    self._feed(self.CRUISE_STANDBY, self.CONT_EXIT_SPEED_LOW - 0.1)
+    assert not self._steers(), f"did not release below CONT_EXIT_SPEED_LOW ({self.CONT_EXIT_SPEED_LOW})"
+
+  def test_latch_exit_speed_high_is_tightly_bracketed(self):
+    """Same tripwire shape for the high-speed exit: still latched just below
+    CONT_EXIT_SPEED_HIGH, released just above it.
+    """
+    assert self.CONT_EXIT_SPEED_HIGH - 0.1 > self.CONT_EXIT_SPEED_LOW, \
+      "bracket's low end must stay above CONT_EXIT_SPEED_LOW or the release would be for the wrong reason"
+    self._decelerate_into_standby()
+    assert self._steers()
+    self._feed(self.CRUISE_STANDBY, self.CONT_EXIT_SPEED_HIGH - 0.1)
+    assert self._steers(), f"released below CONT_EXIT_SPEED_HIGH ({self.CONT_EXIT_SPEED_HIGH})"
+    self._feed(self.CRUISE_STANDBY, self.CONT_EXIT_SPEED_HIGH + 0.1)
+    assert not self._steers(), f"did not release at/above CONT_EXIT_SPEED_HIGH ({self.CONT_EXIT_SPEED_HIGH})"
 
   def test_brake_releases_it(self):
     self._decelerate_into_standby()
@@ -1333,7 +1381,7 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
   def test_stopping_releases_it(self):
     self._decelerate_into_standby()
     assert self._steers()
-    self._feed(self.CRUISE_STANDBY, self.CONT_EXIT_SPEED_LOW - 0.3)
+    self._feed(self.CRUISE_STANDBY, 0.2)
     assert not self._steers(), "latch survived coming to a stop"
 
   def test_cruise_switched_off_releases_it(self):
