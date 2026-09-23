@@ -95,7 +95,7 @@ def test_run_frame_gate_skips_the_model_and_publishes_synthetic_state_when_disab
   model = _ExplodingModel()
   pm = _FakePubMaster()
 
-  run_frame(True, model, pm, 99, np.zeros(3), True, buf=None, model_transform=None)
+  run_frame(True, model=model, pm=pm, frame_id=99, calib=np.zeros(3), wheel_on_right_saved=True, buf=None, model_transform=None)
 
   assert len(pm.sent) == 1
   name, msg = pm.sent[0]
@@ -112,7 +112,7 @@ def test_run_frame_gate_runs_the_model_and_publishes_its_output_when_enabled() -
   model = _FakeModel(output_slices, np.zeros(size, dtype=np.float32))
   pm = _FakePubMaster()
 
-  run_frame(False, model, pm, 7, np.zeros(3), True, buf=object(), model_transform=np.eye(3, dtype=np.float32))
+  run_frame(False, model=model, pm=pm, frame_id=7, calib=np.zeros(3), wheel_on_right_saved=True, buf=object(), model_transform=np.eye(3, dtype=np.float32))
 
   assert model.run_calls == 1
   assert len(pm.sent) == 1

@@ -242,8 +242,9 @@ def main():
   pm = PubMaster(["driverStateV2"])
   params = Params()
   dm_disabled = params.get_bool("DisableDriverMonitoring")
-  # Read once at startup, not per frame: unlike DisableDriverMonitoring this isn't a live
-  # toggle a user flips while driving, it's dmonitoringd.py's own last-saved side.
+  # Read once at startup to ensure a value before the first re-read; wheel_on_right_saved is
+  # dmonitoringd.py's own last-saved side, persisted once per 6000 frames. Re-read periodically
+  # so the cached value stays in sync with what dmonitoringd.py has persisted.
   wheel_on_right_saved = params.get_bool("IsRhdDetected")
   calib = np.zeros(model.numpy_inputs["calib"].size, dtype=np.float32)
   model_transform = None
@@ -263,12 +264,14 @@ def main():
     if sm.updated["liveCalibration"]:
       calib[:] = np.array(sm["liveCalibration"].rpyCalib)
 
-    # Re-read at 0.5 Hz so the switch takes effect without a restart. The frame above is
+    # Re-read at 0.5 Hz so the switches take effect without a restart. The frame above is
     # still received either way, so camerad's stream is drained and the publish rate stays
     # at the camera's 20 Hz.
     if vipc_client.frame_id % 40 == 1:
       dm_disabled = params.get_bool("DisableDriverMonitoring")
-    run_frame(dm_disabled, model, pm, vipc_client.frame_id, calib, wheel_on_right_saved, buf, model_transform)
+      wheel_on_right_saved = params.get_bool("IsRhdDetected")
+    run_frame(dm_disabled, model=model, pm=pm, frame_id=vipc_client.frame_id, calib=calib,
+              wheel_on_right_saved=wheel_on_right_saved, buf=buf, model_transform=model_transform)
 
 
 if __name__ == "__main__":
