@@ -195,6 +195,29 @@ def get_driverstate_packet(model_output, frame_id: int, exec_time: float, gpu_ex
   return msg
 
 
+def run_frame(dm_disabled: bool, model: ModelState, pm: PubMaster, frame_id: int, calib: np.ndarray,
+              wheel_on_right_saved: bool, buf: VisionBuf, model_transform: np.ndarray) -> None:
+  """The bypass gate: main()'s loop calls this once per frame with the current dm_disabled
+  value. When it's set, publish the synthetic attentive packet and skip the model entirely -
+  the tinygrad forward pass never runs while the bypass is active, it isn't merely
+  computed-then-discarded. Otherwise run the model and publish its real output, unchanged from
+  before the bypass existed."""
+  if dm_disabled:
+    pm.send("driverStateV2", get_attentive_packet(frame_id, calib, wheel_on_right_saved))
+    return
+
+  start = time.perf_counter()
+  model_output, gpu_execution_time = model.run(buf, calib, model_transform)
+  execution_time = time.perf_counter() - start
+  raw_pred = model_output.tobytes() if SEND_RAW_PRED else b""
+  parsed = parse_model_output(slice_outputs(model_output, model.output_slices))
+  parsed["raw_pred"] = raw_pred
+  pm.send(
+    "driverStateV2",
+    get_driverstate_packet(parsed, frame_id, execution_time, gpu_execution_time),
+  )
+
+
 def main():
   params = Params()
   cpu_cores = dmonitoring_cpu_cores(params, chestnut_firmware_ready())
@@ -245,20 +268,7 @@ def main():
     # at the camera's 20 Hz.
     if vipc_client.frame_id % 40 == 1:
       dm_disabled = params.get_bool("DisableDriverMonitoring")
-    if dm_disabled:
-      pm.send("driverStateV2", get_attentive_packet(vipc_client.frame_id, calib, wheel_on_right_saved))
-      continue
-
-    start = time.perf_counter()
-    model_output, gpu_execution_time = model.run(buf, calib, model_transform)
-    execution_time = time.perf_counter() - start
-    raw_pred = model_output.tobytes() if SEND_RAW_PRED else b""
-    parsed = parse_model_output(slice_outputs(model_output, model.output_slices))
-    parsed["raw_pred"] = raw_pred
-    pm.send(
-      "driverStateV2",
-      get_driverstate_packet(parsed, vipc_client.frame_id, execution_time, gpu_execution_time),
-    )
+    run_frame(dm_disabled, model, pm, vipc_client.frame_id, calib, wheel_on_right_saved, buf, model_transform)
 
 
 if __name__ == "__main__":
