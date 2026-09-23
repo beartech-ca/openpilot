@@ -5020,6 +5020,19 @@
         ]
       },
       {
+        "key": "LaneCenteringIntegralGain",
+        "label": "Lane Centering Integral Gain",
+        "description": "How fast a standing offset from the lane center is worked off. 0 disables the integral term and leaves lane centering purely proportional. The default 0.03 removes a 0.1 m standing error over roughly ten seconds.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 0.2,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "LaneCentering",
+        "settings_tier": "advanced"
+      },
+      {
         "key": "HondaLateralPidKpScale",
         "label": "Honda PID Kp Scale",
         "description": "Scale the active Honda lateralTuning.pid.kpV values from openDBC. Applies live to Honda PID lateral only.",

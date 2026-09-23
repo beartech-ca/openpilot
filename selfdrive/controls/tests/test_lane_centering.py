@@ -208,3 +208,74 @@ def test_visual_direction_uses_filtered_correction_in_deadband():
 def test_visual_direction_follows_applied_correction():
   model = _model(left=-1.5, right=2.1)
   assert get_lane_centering_visual_direction(model, _V_EGO, 0.0, 0.0, True, True, applied_correction=-0.001) == -1
+
+
+_GAIN = 0.03
+
+
+def _integrate(model, steps, *, gain=_GAIN, authority=0.0, controller=None):
+  controller = controller or LaneCenteringController()
+  output = 0.0
+  for _ in range(steps):
+    output = controller.update(0.0, model, _V_EGO, True, 0.0, authority, True, True,
+                               False, False, False, integral_gain=gain)
+  return controller, output
+
+
+def test_zero_gain_leaves_the_controller_purely_proportional():
+  model = _model(left=-1.5, right=2.1)
+  reference, expected = _converge(model, authority=0.0)
+  controller, output = _integrate(model, 300, gain=0.0)
+  assert output == pytest.approx(expected, abs=1e-12)
+  assert controller.integral == 0.0
+  assert reference.integral == 0.0
+
+
+def test_constant_error_builds_the_integral_at_the_expected_rate():
+  # centre +0.3 m at a 20 m lookahead -> raw 2*0.3/400 = 1.5e-3 1/m, under the 0.004 ceiling
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  expected = 300 * _GAIN * (2.0 * 0.3 / _V_EGO ** 2) * 0.01
+  assert controller.integral == pytest.approx(expected, rel=1e-6)
+
+
+def test_integral_stops_at_its_ceiling():
+  controller, _ = _integrate(_model(left=-1.5, right=2.1), 5000)
+  assert controller.integral == pytest.approx(0.0006)
+
+
+def test_no_integration_while_the_proportional_path_is_saturated():
+  # centre +1.6 m -> raw 8e-3, past the 0.004 ceiling
+  controller, _ = _integrate(_model(left=-0.5, right=3.7), 300)
+  assert controller.integral == 0.0
+
+
+def test_integral_sees_the_error_the_deadband_hides():
+  # centre +0.05 m sits inside the 0.08 m deadband: proportional output is zero (see
+  # test_small_center_error_does_not_chatter) but the standing bias still integrates
+  model = _model(left=-1.75, right=1.85)
+  controller, output = _integrate(model, 300)
+  assert controller.integral > 0.0
+  assert output > 0.0
+
+
+def test_e2e_break_in_scales_the_integrated_error_too():
+  model = _model(left=-1.5, right=2.1, path_std=0.1)
+  lane, _ = _integrate(model, 300, authority=0.0)
+  e2e, _ = _integrate(model, 300, authority=1.0)
+  assert 0.0 <= e2e.integral < lane.integral
+
+
+def test_driver_override_clears_the_integral():
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  assert controller.integral > 0.0
+  controller.update(0.0, model, _V_EGO, True, 0.0, 0.0, True, True, False, False, True, integral_gain=_GAIN)
+  assert controller.integral == 0.0
+
+
+def test_invalid_lane_lines_report_valid_false_in_debug():
+  controller = LaneCenteringController()
+  controller.update(0.0, _model(left=-1.5, right=2.1, lane_prob=0.3), _V_EGO, True, 0.0, 0.0, True, True)
+  raw, valid, integral, applied = controller.debug
+  assert valid is False and raw == 0.0 and integral == 0.0

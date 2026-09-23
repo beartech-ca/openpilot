@@ -399,6 +399,7 @@ class Controls:
     self.desired_curvature = 0.0
     self.lc_smooth_release = 0.0
     self.lane_centering = LaneCenteringController()
+    self.lane_centering_settings_logged = None
     self.lc_entry_sign = 0.0
     self.lc_arrest_jerk_factor = 1.0
     self.turn_hold_curvature = 0.0
@@ -451,6 +452,18 @@ class Controls:
       self.LaC.update_live_delay(self.sm['liveDelay'].lateralDelay)
 
     self.starpilot_toggles = get_starpilot_toggles(self.sm)
+
+    settings = (
+      float(self.starpilot_toggles.lane_centering_integral_gain),
+      float(self.starpilot_toggles.lane_center_offset),
+      float(self.starpilot_toggles.lane_centering_e2e_authority),
+      bool(self.starpilot_toggles.lane_centering),
+    )
+    if settings != self.lane_centering_settings_logged:
+      # roadside changes are driven against; the log has to say which values a stretch ran under
+      cloudlog.event("lane_centering_settings", integral_gain=settings[0], offset=settings[1],
+                     e2e_authority=settings[2], enabled=settings[3])
+      self.lane_centering_settings_logged = settings
 
   def update_ecu_disable_failed(self):
     if self.ecu_disable_failed_checked:
@@ -745,7 +758,11 @@ class Controls:
       bool(self.sm.all_checks(['modelV2'])),
       self.starpilot_toggles.lane_centering_pause_on_signal,
       bool(CS.leftBlinker or CS.rightBlinker),
-      bool(CS.steeringPressed))
+      bool(CS.steeringPressed),
+      integral_gain=self.starpilot_toggles.lane_centering_integral_gain)
+    if CC.latActive and self.starpilot_toggles.lane_centering and self.sm.frame % 20 == 0:  # 5 Hz, engaged only
+      raw, valid, integral, applied = self.lane_centering.debug
+      cloudlog.event("lane_centering", raw=raw, valid=valid, integral=integral, applied=applied, v_ego=CS.vEgo)
 
     jerk_factor = 1.0
     if self.starpilot_toggles.lane_change_pace < 10:

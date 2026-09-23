@@ -24,27 +24,48 @@ _E2E_MAX_PATH_STD = 0.35
 _E2E_BREAK_IN_START = 0.15
 _E2E_BREAK_IN_FULL = 0.50
 
+# Integral term. The proportional path cannot remove a standing bias: against a constant
+# error it settles at bias / loop_gain rather than at zero, and this van's end-to-end model
+# leans right by 0.11-0.18 m at the shipped gain. The integrator advances only while the
+# lane lines pass the gate and the proportional path is not saturated, on the error BEFORE
+# the deadband (the deadband would hide most of the bias it exists to remove), and is
+# capped at twice the largest bias measured. 0 gain holds it at zero and leaves the
+# controller purely proportional.
+_INTEGRAL_LIMIT = 0.0006      # 1/m
+_INTEGRAL_MAX_GAIN = 0.2      # 1/s
+
 
 class LaneCenteringController:
   def __init__(self) -> None:
     self._correction = 0.0
+    self._integral = 0.0
+    # (raw correction, lane lines valid, integral, applied correction) from the last update,
+    # for the 5 Hz log controlsd writes: neither end of the controller reconstructs it.
+    self.debug = (0.0, False, 0.0, 0.0)
 
   def reset(self) -> None:
     self._correction = 0.0
+    self._integral = 0.0
+    self.debug = (0.0, False, 0.0, 0.0)
+
+  @property
+  def integral(self) -> float:
+    return self._integral
 
   def update(self, model_curvature, model_v2, v_ego, enabled, offset, e2e_authority, lat_active, model_valid,
-             pause_on_signal=False, turn_signal_active=False, driver_override=False) -> float:
+             pause_on_signal=False, turn_signal_active=False, driver_override=False, integral_gain=0.0) -> float:
     model_curvature = float(model_curvature)
 
     try:
       v_ego = float(v_ego)
       offset = float(offset)
       e2e_authority = float(e2e_authority)
+      integral_gain = float(integral_gain)
     except (TypeError, ValueError):
       self.reset()
       return model_curvature
 
-    if not np.isfinite([v_ego, offset, e2e_authority]).all():
+    if not np.isfinite([v_ego, offset, e2e_authority, integral_gain]).all():
       self.reset()
       return model_curvature
 
@@ -58,6 +79,7 @@ class LaneCenteringController:
 
     if pause_on_signal and turn_signal_active:
       self._correction = float(smooth_value(0.0, self._correction, _SIGNAL_RELEASE_TAU, dt=DT_CTRL))
+      self.debug = (0.0, False, self._integral, self._correction)
       return model_curvature + self._correction
 
     try:
@@ -68,7 +90,7 @@ class LaneCenteringController:
       self.reset()
       return model_curvature
 
-    valid, raw_correction = self._raw_correction(
+    valid, raw_correction, raw_unbanded = self._raw_correction(
       model_v2,
       v_ego,
       float(np.clip(offset, -_MAX_OFFSET, _MAX_OFFSET)),
@@ -76,10 +98,20 @@ class LaneCenteringController:
     )
     if not valid:
       self._correction = float(smooth_value(0.0, self._correction, _CONFIDENCE_RELEASE_TAU, dt=DT_CTRL))
+      self.debug = (0.0, False, self._integral, self._correction)
       return model_curvature + self._correction
 
-    target = float(np.clip(raw_correction, -_MAX_RAW_CORRECTION, _MAX_RAW_CORRECTION)) * _MAX_GAIN
+    clipped = float(np.clip(raw_correction, -_MAX_RAW_CORRECTION, _MAX_RAW_CORRECTION))
+
+    ki = float(np.clip(integral_gain, 0.0, _INTEGRAL_MAX_GAIN))
+    if ki <= 0.0:
+      self._integral = 0.0
+    elif abs(raw_correction) < _MAX_RAW_CORRECTION:
+      self._integral = float(np.clip(self._integral + ki * raw_unbanded * DT_CTRL, -_INTEGRAL_LIMIT, _INTEGRAL_LIMIT))
+
+    target = clipped * _MAX_GAIN + self._integral
     self._correction = float(smooth_value(target, self._correction, _SMOOTH_TAU, dt=DT_CTRL))
+    self.debug = (raw_correction, True, self._integral, self._correction)
     return model_curvature + self._correction
 
   @staticmethod
@@ -91,19 +123,20 @@ class LaneCenteringController:
     return bool(x[0] <= distance <= x[-1])
 
   @staticmethod
-  def _raw_correction(model_v2, v_ego: float, offset: float, e2e_authority: float) -> tuple[bool, float]:
+  def _raw_correction(model_v2, v_ego: float, offset: float, e2e_authority: float) -> tuple[bool, float, float]:
+    """Returns (valid, correction, correction_before_deadband), both corrections in 1/m."""
     try:
       lane_lines = model_v2.laneLines
       probs = np.asarray(model_v2.laneLineProbs, dtype=float)
       stds = np.asarray(model_v2.laneLineStds, dtype=float)
       if len(lane_lines) < 3 or probs.size < 3 or stds.size < 3:
-        return False, 0.0
+        return False, 0.0, 0.0
       if not np.isfinite(probs[[1, 2]]).all() or not np.isfinite(stds[[1, 2]]).all():
-        return False, 0.0
+        return False, 0.0, 0.0
       if np.any(probs[[1, 2]] < _MIN_LANE_PROB) or np.any(probs[[1, 2]] > 1.0):
-        return False, 0.0
+        return False, 0.0, 0.0
       if np.any(stds[[1, 2]] < 0.0) or np.any(stds[[1, 2]] > _MAX_LANE_STD):
-        return False, 0.0
+        return False, 0.0, 0.0
 
       left_x = np.asarray(lane_lines[1].x, dtype=float)
       left_y = np.asarray(lane_lines[1].y, dtype=float)
@@ -114,28 +147,29 @@ class LaneCenteringController:
       if not (LaneCenteringController._valid_path(left_x, left_y) and
               LaneCenteringController._valid_path(right_x, right_y) and
               LaneCenteringController._valid_path(pos_x, pos_y)):
-        return False, 0.0
+        return False, 0.0, 0.0
 
       lookahead = float(np.clip(v_ego, 8.0, 35.0))
       if not all(LaneCenteringController._covers(x, lookahead) for x in (left_x, right_x, pos_x)):
-        return False, 0.0
+        return False, 0.0, 0.0
 
       left = float(np.interp(lookahead, left_x, left_y))
       right = float(np.interp(lookahead, right_x, right_y))
       width = right - left
       if not _MIN_LANE_WIDTH <= width <= _MAX_LANE_WIDTH:
-        return False, 0.0
+        return False, 0.0, 0.0
 
       max_safe_offset = min(_MAX_OFFSET, max(0.0, width * 0.5 - _MIN_CENTER_TO_LINE))
       target_y = 0.5 * (left + right) + float(np.clip(offset, -max_safe_offset, max_safe_offset))
       model_y = float(np.interp(lookahead, pos_x, pos_y))
-      error = target_y - model_y
-      error_abs = abs(error)
+      error_unbanded = target_y - model_y
+      error_abs = abs(error_unbanded)
       if error_abs <= _CENTER_ERROR_DEADBAND:
         error = 0.0
       else:
-        error = np.copysign(error_abs - _CENTER_ERROR_DEADBAND, error)
+        error = float(np.copysign(error_abs - _CENTER_ERROR_DEADBAND, error_unbanded))
 
+      e2e_scale = 1.0
       try:
         pos_y_std = np.asarray(model_v2.position.yStd, dtype=float)
         if LaneCenteringController._valid_path(pos_x, pos_y_std):
@@ -146,17 +180,18 @@ class LaneCenteringController:
               0.0,
               1.0,
             )
-            error *= 1.0 - e2e_authority * float(break_in)
+            e2e_scale = 1.0 - e2e_authority * float(break_in)
       except (AttributeError, TypeError, ValueError):
         pass
 
-      return True, float(2.0 * error / lookahead ** 2)
+      gain = 2.0 / lookahead ** 2
+      return True, float(gain * error * e2e_scale), float(gain * error_unbanded * e2e_scale)
     except (AttributeError, IndexError, TypeError, ValueError):
-      return False, 0.0
+      return False, 0.0, 0.0
 
 
 def get_raw_lane_centering_correction(model_v2, v_ego: float, offset: float,
-                                      e2e_authority: float) -> tuple[bool, float]:
+                                      e2e_authority: float) -> tuple[bool, float, float]:
   """Return the instantaneous lane-centering correction without controller filtering."""
   return LaneCenteringController._raw_correction(model_v2, v_ego, offset, e2e_authority)
 
@@ -180,7 +215,7 @@ def get_lane_centering_visual_direction(model_v2, v_ego: float, offset: float, e
   except (AttributeError, TypeError, ValueError):
     return 0
 
-  valid, correction = get_raw_lane_centering_correction(
+  valid, correction, _ = get_raw_lane_centering_correction(
     model_v2,
     v_ego,
     float(np.clip(offset, -_MAX_OFFSET, _MAX_OFFSET)),
