@@ -195,7 +195,7 @@ def get_driverstate_packet(model_output, frame_id: int, exec_time: float, gpu_ex
   return msg
 
 
-def run_frame(dm_disabled: bool, model: ModelState, pm: PubMaster, frame_id: int, calib: np.ndarray,
+def run_frame(dm_disabled: bool, *, model: ModelState, pm: PubMaster, frame_id: int, calib: np.ndarray,
               wheel_on_right_saved: bool, buf: VisionBuf, model_transform: np.ndarray) -> None:
   """The bypass gate: main()'s loop calls this once per frame with the current dm_disabled
   value. When it's set, publish the synthetic attentive packet and skip the model entirely -
