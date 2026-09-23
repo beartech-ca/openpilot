@@ -249,10 +249,20 @@ def test_integral_stops_at_its_ceiling():
   assert controller.integral == pytest.approx(0.0006)
 
 
-def test_no_integration_while_the_proportional_path_is_saturated():
+def test_integral_holds_while_the_proportional_path_is_saturated():
+  # Build a non-zero integral while unsaturated, then confirm the gate holds it rather than
+  # zeroing it once the proportional path saturates: a dead integrator would also read 0.0 here.
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  held = controller.integral
+  assert held > 0.0
+
   # centre +1.6 m -> raw 8e-3, past the 0.004 ceiling
-  controller, _ = _integrate(_model(left=-0.5, right=3.7), 300)
-  assert controller.integral == 0.0
+  saturated = _model(left=-0.5, right=3.7)
+  for _ in range(300):
+    controller.update(0.0, saturated, _V_EGO, True, 0.0, 0.0, True, True,
+                      False, False, False, integral_gain=_GAIN)
+  assert controller.integral == held
 
 
 def test_integral_sees_the_error_the_deadband_hides():
@@ -328,8 +338,50 @@ def test_driver_override_clears_the_integral():
   assert controller.integral == 0.0
 
 
+# The `_update` helper used above passes no `integral_gain`, so it runs at the default 0.0 and
+# `_integral` is identically zero there: it cannot tell a real reset from an integrator that was
+# never running. These build a non-zero integral first, then trip each hard gate directly.
+
+
+def test_lane_change_resets_a_nonzero_integral():
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  assert controller.integral > 0.0
+  lane_change_model = _model(left=-1.5, right=2.1, lane_change=1)
+  controller.update(0.0, lane_change_model, _V_EGO, True, 0.0, 0.0, True, True,
+                    False, False, False, integral_gain=_GAIN)
+  assert controller.integral == 0.0
+
+
+def test_model_invalid_resets_a_nonzero_integral():
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  assert controller.integral > 0.0
+  controller.update(0.0, model, _V_EGO, True, 0.0, 0.0, True, False,
+                    False, False, False, integral_gain=_GAIN)
+  assert controller.integral == 0.0
+
+
+def test_below_speed_gate_resets_a_nonzero_integral():
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  assert controller.integral > 0.0
+  controller.update(0.0, model, 4.9, True, 0.0, 0.0, True, True,
+                    False, False, False, integral_gain=_GAIN)
+  assert controller.integral == 0.0
+
+
+def test_non_finite_input_resets_a_nonzero_integral():
+  model = _model(left=-1.5, right=2.1)
+  controller, _ = _integrate(model, 300)
+  assert controller.integral > 0.0
+  controller.update(0.0, model, _V_EGO, True, float("nan"), 0.0, True, True,
+                    False, False, False, integral_gain=_GAIN)
+  assert controller.integral == 0.0
+
+
 def test_invalid_lane_lines_report_valid_false_in_debug():
   controller = LaneCenteringController()
   controller.update(0.0, _model(left=-1.5, right=2.1, lane_prob=0.3), _V_EGO, True, 0.0, 0.0, True, True)
   raw, valid, integral, applied = controller.debug
-  assert valid is False and raw == 0.0 and integral == 0.0
+  assert valid is False and raw == 0.0
