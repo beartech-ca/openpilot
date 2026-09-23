@@ -293,6 +293,9 @@ def test_requested_simple_and_advanced_settings_tiers():
         if not param["key"].startswith("PIPPreview")
         and param["key"] != "DisableWideRoad"
       ]
+    if section_name == "Vehicle":
+      transit_lka_keys = {"TransitLkaIntervention", "TransitLkaRamp", "TransitLkaContinuation"}
+      params = [param for param in params if param["key"] not in transit_lka_keys]
     assert {param["settings_tier"] for param in params} == {"simple"}
 
   for key in ("AlwaysOnLateral", "LaneChanges", "QOLLateral"):
@@ -501,3 +504,26 @@ def test_pip_preview_is_under_driving_screen_widgets_and_configured_only_in_gala
     REPO_ROOT / "selfdrive/ui/layouts/settings/starpilot/appearance.py",
   )
   assert all("PIPPreview" not in path.read_text(encoding="utf-8") for path in physical_settings)
+
+
+def test_transit_lka_switches_are_ford_only_in_the_vehicle_section():
+  sections = _params_by_section(_layout())
+  vehicle = sections["Vehicle"]
+  keys = ("TransitLkaIntervention", "TransitLkaRamp", "TransitLkaContinuation")
+  for key in keys:
+    assert key in vehicle, key
+    assert vehicle[key]["vehicle_makes"] == ["Ford"]
+    assert vehicle[key]["settings_tier"] == "advanced"
+  for name, params in sections.items():
+    if name != "Vehicle":
+      assert set(keys).isdisjoint(params)
+
+  for key in ("TransitLkaIntervention", "TransitLkaRamp"):
+    assert vehicle[key]["data_type"] == "int"
+    assert vehicle[key]["ui_type"] == "dropdown"
+    assert [o["value"] for o in vehicle[key]["options"]] == [0, 1, 2]
+
+  continuation = vehicle["TransitLkaContinuation"]
+  assert continuation["data_type"] == "bool"
+  assert continuation["ui_type"] == "toggle"
+  assert continuation["requires_offroad"] is True

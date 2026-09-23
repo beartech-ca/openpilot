@@ -3389,6 +3389,71 @@
         "settings_tier": "simple"
       },
       {
+        "key": "TransitLkaIntervention",
+        "label": "Transit LKA Intervention",
+        "description": "Which intervention the PSCM is asked for. Standard and Increasing hold one of them; Preset escalates to Increasing only on large requests. In the recorded drives Standard moved the wheel 50-60% more than Increasing at every request size, so Standard is the one to use. Takes effect immediately.",
+        "picker_description": "Which LKA intervention code the Transit's PSCM is asked for.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Standard (recommended)"
+          },
+          {
+            "value": 1,
+            "label": "Increasing"
+          },
+          {
+            "value": 2,
+            "label": "Preset"
+          }
+        ],
+        "vehicle_makes": [
+          "Ford"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TransitLkaRamp",
+        "label": "Transit LKA Ramp",
+        "description": "How quickly the PSCM applies each request; the car calls the two Smooth and Quick. Slow and Fast hold one of them; Preset switches to Fast on large or fast-changing requests. The stock camera uses Smooth on every frame, and a fast ramp halves what a sustained demand achieves, so Slow is the one to use. Takes effect immediately.",
+        "picker_description": "How quickly the Transit's PSCM applies each LKA request.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Slow (recommended)"
+          },
+          {
+            "value": 1,
+            "label": "Fast"
+          },
+          {
+            "value": 2,
+            "label": "Preset"
+          }
+        ],
+        "vehicle_makes": [
+          "Ford"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "TransitLkaContinuation",
+        "label": "Transit LKA: Continue Below Cruise Cancel",
+        "description": "Keep steering after the car cancels cruise at about 18 km/h on the way to a stop. Lateral only: openpilot still cannot accelerate or brake there. The van keeps steering while your cruise reads off; braking releases it. Experimental. Read once at startup, so change it while parked.",
+        "picker_description": "Keeps the Transit steering below the PCM's low-speed cruise cancel.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "requires_offroad": true,
+        "vehicle_makes": [
+          "Ford"
+        ],
+        "settings_tier": "advanced"
+      },
+      {
         "key": "NAPRadarEnabled",
         "label": "Tesla Pre-AP Bosch Radar",
         "description": "Use the stock Bosch radar path on pre-Autopilot Teslas.",

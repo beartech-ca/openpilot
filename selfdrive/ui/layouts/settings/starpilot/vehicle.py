@@ -70,6 +70,19 @@ ACTION_OPTIONS = [
 ACTION_NAMES = [o["name"] for o in ACTION_OPTIONS]
 ACTION_NAME_BY_ID = {o["id"]: o["name"] for o in ACTION_OPTIONS}
 
+# Transit LKA pickers: param -> (title, option labels in enum order). See opendbc/car/ford/values.py.
+TRANSIT_LKA_PICKERS = {
+  "TransitLkaIntervention": (tr_noop("Transit LKA Intervention"),
+                             (tr_noop("Standard (recommended)"), tr_noop("Increasing"), tr_noop("Preset"))),
+  "TransitLkaRamp": (tr_noop("Transit LKA Ramp"),
+                     (tr_noop("Slow (recommended)"), tr_noop("Fast"), tr_noop("Preset"))),
+}
+
+
+def _transit_lka_label(params, key: str) -> str:
+  labels = TRANSIT_LKA_PICKERS[key][1]
+  return tr(labels[min(max(params.get_int(key), 0), len(labels) - 1)])
+
 
 def _lock_doors_timer_labels():
   labels: dict[float, str] = {0.0: tr("Never")}
@@ -180,6 +193,12 @@ class VehicleSettingsManagerView(PanelManagerView):
         get_value=lambda k=star_keys: self._combo_value(k),
         on_click=lambda: self._controller._on_select("combo:star"),
       ))
+
+    if cs.isFord:
+      for key in TRANSIT_LKA_PICKERS:
+        rows.append(SettingRow(key, "value", TRANSIT_LKA_PICKERS[key][0],
+                               get_value=lambda k=key: _transit_lka_label(self._controller._params, k),
+                               on_click=lambda k=key: self._controller._on_select(k)))
 
     return rows
 
@@ -416,6 +435,14 @@ class VehicleSettingsManagerView(PanelManagerView):
         "subtitle": tr("Use the left paddle to pause openpilot acceleration and braking."),
         "get_state": lambda: self._controller._params.get_bool("NostalgiaMode"),
         "set_state": lambda s: self._controller._on_toggle("NostalgiaMode"),
+      })
+
+    if cs.isFord:
+      toggles.append({
+        "title": tr("Transit LKA: Continue Below Cruise Cancel"),
+        "subtitle": tr("Keep steering below the 18 km/h cruise cancel. Lateral only. Read at startup."),
+        "get_state": lambda: self._controller._params.get_bool("TransitLkaContinuation"),
+        "set_state": lambda s: self._controller._on_toggle("TransitLkaContinuation"),
       })
 
     return toggles
@@ -717,6 +744,8 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
       self._on_select_model()
     elif key == "LockDoorsTimer":
       self._show_lock_timer_selector()
+    elif key in TRANSIT_LKA_PICKERS:
+      self._show_transit_lka_picker(key)
     else:
       self._show_action_picker(key)
 
@@ -827,6 +856,18 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
         self._params.put_int(key, option_ids[idx])
 
     dialog = MultiOptionDialog(tr(self._action_title(key)), option_labels, current, callback=on_select)
+    gui_app.push_widget(dialog)
+
+  def _show_transit_lka_picker(self, key: str):
+    title, labels = TRANSIT_LKA_PICKERS[key]
+    option_labels = [tr(label) for label in labels]
+    current = option_labels[min(max(self._params.get_int(key), 0), len(labels) - 1)]
+
+    def on_select(res):
+      if res == DialogResult.CONFIRM and dialog.selection in option_labels:
+        self._params.put_int(key, option_labels.index(dialog.selection))
+
+    dialog = MultiOptionDialog(tr(title), option_labels, current, callback=on_select)
     gui_app.push_widget(dialog)
 
   def _show_lock_timer_selector(self):
