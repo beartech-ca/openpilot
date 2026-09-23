@@ -25,6 +25,17 @@ def test_sidebar_reports_connect_disabled():
   assert (color.r, color.g, color.b, color.a) == (sidebar.Colors.GRAY.r, sidebar.Colors.GRAY.g, sidebar.Colors.GRAY.b, sidebar.Colors.GRAY.a)
 
 
+def test_sidebar_reports_disabled_by_default():
+  # No athena_enabled override: exercises this fork's actual binding, the default argument
+  # at selfdrive/ui/layouts/sidebar.py:55 (connection_status(..., athena_enabled=ATHENA_ENABLED)),
+  # not just the function's branch. test_sidebar_reports_connect_disabled above passes
+  # athena_enabled=False explicitly, so it stays green even if ATHENA_ENABLED were flipped
+  # back to True; this one does not.
+  label, value, color = sidebar.connection_status(last_ping=0, now_ns=0)
+  assert (label, value) == ("CONNECT", "DISABLED")
+  assert (color.r, color.g, color.b, color.a) == (sidebar.Colors.GRAY.r, sidebar.Colors.GRAY.g, sidebar.Colors.GRAY.b, sidebar.Colors.GRAY.a)
+
+
 def test_prime_home_screen_shows_neither_pairing_prompt_nor_subscription_claim():
   # With ATHENA_ENABLED False, prime_type is frozen wherever _load_initial_state() found
   # it and can never advance -- so both branches the UI actually reads (is_paired() in
