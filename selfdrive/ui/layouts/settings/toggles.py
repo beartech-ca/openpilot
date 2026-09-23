@@ -28,6 +28,7 @@ DESCRIPTIONS = {
     "without a turn signal activated while driving over 31 mph (50 km/h)."
   ),
   "AlwaysOnDM": tr_noop("Enable driver monitoring even when openpilot is not engaged."),
+  "DisableDriverMonitoring": tr_noop("Disables driver monitoring and driver-camera recording. The physical camera remains active, but its frames are not analyzed or saved. You must stay attentive and remain responsible for safe operation. Changing this setting restarts the onroad processes."),  # noqa: E501
   'RecordFront': tr_noop("Upload data from the driver facing camera and help improve the driver monitoring algorithm."),
   "IsRHD": tr_noop("Use right-hand-drive driver monitoring. This follows the auto-detected side until changed manually."),
   "IsMetric": tr_noop("Display speed in km/h instead of mph."),
@@ -79,6 +80,12 @@ class TogglesLayout(Widget):
         DESCRIPTIONS["AlwaysOnDM"],
         "monitoring.png",
         False,
+      ),
+      "DisableDriverMonitoring": (
+        lambda: tr("Disable Driver Monitoring"),
+        DESCRIPTIONS["DisableDriverMonitoring"],
+        "monitoring.png",
+        True,
       ),
       "IsRHD": (
         lambda: tr("Right Hand Driving"),
@@ -236,6 +243,8 @@ class TogglesLayout(Widget):
       if self._toggle_defs[toggle_def][3] and toggle_def not in self._locked_toggles:
         self._toggles[toggle_def].action_item.set_enabled(not ui_state.engaged)
 
+    self._update_record_front_toggle()
+
   def _render(self, rect):
     self._scroller.render(rect)
 
@@ -268,6 +277,23 @@ class TogglesLayout(Widget):
       self._handle_experimental_mode_toggle(state)
       return
 
+    if param == "DisableDriverMonitoring":
+      if state:
+        def confirm_callback(result: DialogResult):
+          if result == DialogResult.CONFIRM:
+            self._set_driver_monitoring_disabled(True)
+          else:
+            self._toggles[param].action_item.set_state(False)
+          self._update_record_front_toggle()
+
+        content = (f"<h1>{self._toggles[param].title}</h1><br>" +
+                   f"<p>{tr(DESCRIPTIONS[param])}</p>")
+        gui_app.push_widget(ConfirmDialog(content, tr("Disable"), rich=True, callback=confirm_callback))
+      else:
+        self._set_driver_monitoring_disabled(False)
+        self._update_record_front_toggle()
+      return
+
     self._params.put_bool(param, state)
     if param == "IsRHD":
       self._params.put_bool("IsRHDOverride", True)
@@ -276,6 +302,15 @@ class TogglesLayout(Widget):
 
   def _set_longitudinal_personality(self, button_index: int):
     self._params.put("LongitudinalPersonality", button_index)
+
+  def _set_driver_monitoring_disabled(self, disabled: bool):
+    self._params.put_bool("DisableDriverMonitoring", disabled, block=True)
+    self._params.put_bool("OnroadCycleRequested", True, block=True)
+
+  def _update_record_front_toggle(self):
+    if "RecordFront" not in self._locked_toggles:
+      dm_disabled = self._params.get_bool("DisableDriverMonitoring")
+      self._toggles["RecordFront"].action_item.set_enabled(not ui_state.engaged and not dm_disabled)
 
   def _sync_rhd_toggle(self):
     if not self._params.get_bool("IsRHDOverride"):

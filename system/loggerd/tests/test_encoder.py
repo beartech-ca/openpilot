@@ -51,9 +51,16 @@ class TestEncoder:
     return os.path.join(Paths.log_root(), last_route)
 
   # TODO: this should run faster than real time
-  @parameterized.expand([(True, ), (False, )])
-  def test_log_rotation(self, record_front):
-    Params().put_bool("RecordFront", record_front)
+  @parameterized.expand([
+    (False, False, False),
+    (False, True, False),
+    (True, False, True),
+    (True, True, False),
+  ])
+  def test_log_rotation(self, record_front, dm_disabled, expect_driver_recording):
+    params = Params()
+    params.put_bool("RecordFront", record_front)
+    params.put_bool("DisableDriverMonitoring", dm_disabled)
 
     managed_processes['sensord'].start()
     managed_processes['loggerd'].start()
@@ -78,10 +85,10 @@ class TestEncoder:
       counts = []
       first_frames = []
       for camera, fps, size_lambda, encode_idx_name in CAMERAS:
-        if not record_front and "dcamera" in camera:
-          continue
-
         file_path = f"{route_prefix_path}--{i}/{camera}"
+        if not expect_driver_recording and "dcamera" in camera:
+          assert not os.path.exists(file_path), f"segment #{i}: unexpected '{file_path}'"
+          continue
 
         # check file exists
         assert os.path.exists(file_path), f"segment #{i}: '{file_path}' missing"

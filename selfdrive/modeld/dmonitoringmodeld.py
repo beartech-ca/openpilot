@@ -23,6 +23,7 @@ from openpilot.common.transformations.camera import _ar_ox_fisheye, _os_fisheye
 from openpilot.common.transformations.model import dmonitoringmodel_intrinsics
 from openpilot.selfdrive.modeld.helpers import get_tg_input_devices
 from openpilot.selfdrive.modeld.parse_model_outputs import safe_exp, sigmoid
+from openpilot.selfdrive.monitoring.policy import DRIVER_MONITOR_SETTINGS
 from openpilot.starpilot.common.model_lab import load_model_lab_config
 from openpilot.system.hardware.usb import chestnut_firmware_ready
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
@@ -34,6 +35,51 @@ MODEL_PKL_PATH = MODELS_DIR / "dmonitoring_model_tinygrad.pkl"
 METADATA_PATH = MODELS_DIR / "dmonitoring_model_metadata.pkl"
 DEFAULT_DMONITORING_CORES = 7
 MODEL_LAB_DMONITORING_CORES = [0, 1, 2, 3]
+
+_DM = DRIVER_MONITOR_SETTINGS()
+
+
+def get_attentive_packet(frame_id: int, calib: np.ndarray):
+  """A driverStateV2 describing a driver looking straight ahead with their eyes open.
+
+  Published in place of the model's own output while DisableDriverMonitoring is set, so that
+  everything below this point - the policy and its timers, selfdrived's events, controlsd's
+  forceDecel, the face on screen - keeps running on self-consistent data instead of having
+  its conclusions overridden one at a time in half a dozen places.
+
+  The face sits at the centre of the frame, so both focal angles in
+  policy.face_orientation_from_model are zero, and the orientation is chosen so that function
+  returns exactly the natural offsets the policy compares against:
+
+      pitch = pitch_model + 0 - rpy_calib[1]   ->  pitch_model = PITCH_NATURAL + calib[1]
+      yaw   = -yaw_model  + 0 - rpy_calib[2]   ->  yaw_model   = -(YAW_NATURAL + calib[2])
+
+  Standard deviations are zero, under _HI_STD_THRESHOLD so the pose reads as low-std and
+  under _DCAM_UNCERTAIN_ALERT_THRESHOLD so the camera never reads as uncertain.
+  """
+  msg = messaging.new_message('driverStateV2', valid=True)
+  ds = msg.driverStateV2
+  ds.frameId = frame_id
+  ds.modelExecutionTime = 0.0
+  ds.gpuExecutionTime = 0.0
+  ds.rawPredictions = b''
+  ds.wheelOnRightProb = 0.5
+  orientation = [float(_DM._PITCH_NATURAL_OFFSET + calib[1]),
+                 float(-(_DM._YAW_NATURAL_OFFSET + calib[2])), 0.0]
+  for side in (ds.leftDriverData, ds.rightDriverData):
+    side.faceOrientation = orientation
+    side.faceOrientationStd = [0.0, 0.0, 0.0]
+    side.facePosition = [0.0, 0.0]
+    side.facePositionStd = [0.0, 0.0]
+    side.faceProb = 1.0
+    side.leftEyeProb = 1.0
+    side.rightEyeProb = 1.0
+    side.leftBlinkProb = 0.0
+    side.rightBlinkProb = 0.0
+    side.sunglassesProb = 0.0
+    side.phoneProb = 0.0
+    side.sleepProb = 0.0
+  return msg
 
 
 def dmonitoring_cpu_cores(params: Params, chestnut_ready: bool) -> int | list[int]:
@@ -163,6 +209,8 @@ def main():
 
   sm = SubMaster(["liveCalibration"])
   pm = PubMaster(["driverStateV2"])
+  params = Params()
+  dm_disabled = params.get_bool("DisableDriverMonitoring")
   calib = np.zeros(model.numpy_inputs["calib"].size, dtype=np.float32)
   model_transform = None
 
@@ -180,6 +228,15 @@ def main():
     sm.update(0)
     if sm.updated["liveCalibration"]:
       calib[:] = np.array(sm["liveCalibration"].rpyCalib)
+
+    # Re-read at 0.5 Hz so the switch takes effect without a restart. The frame above is
+    # still received either way, so camerad's stream is drained and the publish rate stays
+    # at the camera's 20 Hz.
+    if vipc_client.frame_id % 40 == 1:
+      dm_disabled = params.get_bool("DisableDriverMonitoring")
+    if dm_disabled:
+      pm.send("driverStateV2", get_attentive_packet(vipc_client.frame_id, calib))
+      continue
 
     start = time.perf_counter()
     model_output, gpu_execution_time = model.run(buf, calib, model_transform)
