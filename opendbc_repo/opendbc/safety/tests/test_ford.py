@@ -719,9 +719,10 @@ class TestFordTransitLkaSafety(TestFordSafetyBase):
           self.assertEqual(should_tx, self._tx(self._lka_angle_msg(action, 0.)))
 
   def test_heartbeat_frame_is_never_blocked(self):
-    # The all-zero heartbeat payload decodes to a -5.9 deg relative request, which would
-    # become a real steering request unless the relative term is forced to zero whenever
-    # the action is not a steering request.
+    # The all-zero heartbeat payload decodes to a -5.9 deg relative request, but action
+    # 0 (idle) is not one of the four steer_control_enabled values, so the relative
+    # request is never read and never checked against any bound: the frame is defended
+    # by that branch shape, not by the relative term being forced to zero anywhere.
     for allowed in (0, 1):
       for angle in (0., 12.3, -12.3):
         self.safety.set_controls_allowed(allowed)

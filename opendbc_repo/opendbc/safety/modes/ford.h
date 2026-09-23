@@ -366,11 +366,10 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
       int rel_tenths = ROUND(rel_mrad * (1.8f / 3.14159265f));
 
       // The PSCM ignores the requested angle when the action is idle, and an all-zero
-      // heartbeat payload decodes to -102.4 mrad, not zero. Zero the relative term so an
-      // idle frame carries no steering request at all.
-      if (!steer_control_enabled) {
-        rel_tenths = 0;
-      }
+      // heartbeat payload decodes to -102.4 mrad, not zero. rel_tenths is not zeroed for
+      // an idle frame: it is only ever read below inside `steer_control_enabled`, so the
+      // idle frame carries no steering request because of that guard, not because the
+      // value itself is cleared.
 
       // The only place the continuation latch is consulted. Every other branch of this
       // hook keeps gating on controls_allowed alone, which confines the latch to lateral.
