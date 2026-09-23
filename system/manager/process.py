@@ -699,7 +699,28 @@ class DaemonProcess(ManagerProcess):
     self.params.put(self.param_name, proc.pid)
 
   def stop(self, retry=True, block=True, sig=None) -> None:
-    pass
+    # Enabled daemons intentionally survive manager restarts. When a build disables one,
+    # stop a stale copy left running by the previous build.
+    if self.enabled:
+      return
+    if self.params is None:
+      self.params = Params()
+
+    pid_value = self.params.get(self.param_name)
+    if pid_value is None:
+      return
+
+    try:
+      pid = int(pid_value)
+      os.kill(pid, 0)
+      with open(f'/proc/{pid}/cmdline') as f:
+        command = f.read()
+      if self.module in command:
+        os.kill(pid, signal.SIGTERM if sig is None else sig)
+    except (OSError, ValueError, FileNotFoundError):
+      pass
+    finally:
+      self.params.remove(self.param_name)
 
 
 def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params=None, CP: car.CarParams=None,
