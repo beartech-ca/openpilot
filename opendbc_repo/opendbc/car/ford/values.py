@@ -310,9 +310,9 @@ class CAR(Platforms):
     # 2022 T-350 AWD cargo van, long wheelbase high roof, the van this branch is driven on.
     # mass 2864 = 3000 kg as driven (owner-reported, tools aboard) minus the 136 kg
     #   STD_CARGO_KG that interfaces.py adds; the curb weight would understate it by 12%.
-    # wheelbase: owner-confirmed 148 in.
-    # steerRatio 20.9: least-squares fit of yaw-rate curvature against steering angle over
-    #   11,658 samples at 36-86 km/h (r = 0.967) pins steerRatio * wheelbase = 78.43 m.
+    # wheelbase: measured 148 in (3.759 m); code carries 3.750 (0.2% low). Kept because steerRatio
+    # is the fitted partner: the pair's product 78.375 reproduces the fit (78.43 to least-squares
+    # of 11,658 yaw-rate samples at 36-86 km/h, r=0.967) to within 0.07%.
     # See dev-notes/2026-09-16-transit-mk5-lka-port-design.md.
     CarSpecs(mass=2864, wheelbase=3.750, steerRatio=20.9),
   )
