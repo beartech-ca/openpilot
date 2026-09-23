@@ -135,9 +135,14 @@ class CarState(CarStateBase):
 
     # Lateral continuation: the PCM leaves Active for Standby at about 17.8 km/h and every
     # command stops, lateral included. Latch on that transition so Lane_Assist_Data1 keeps
-    # flowing below it. Panda recomputes the same latch from the same three signals
-    # (safety/modes/ford.h); thresholds and conditions must stay identical. vEgoRaw, not
-    # vEgo, because panda reads Veh_V_ActlBrk unfiltered.
+    # flowing below it. panda recomputes the same entry/exit conditions from the same three
+    # signals (safety/modes/ford.h), but is deliberately the stricter of the two: it also
+    # clears its latch on safety_rx_checks_invalid, which this side does not repeat. That
+    # asymmetry is safe, not a bug to fix here - a stale EngBrakeData stream already drives
+    # cp.can_valid false, so openpilot disengages via canError within about 1s regardless of
+    # what this latch does; panda's extra clear is fail-safe redundancy against outliving a
+    # stale rx stream, not a requirement this side must mirror. vEgoRaw, not vEgo, because
+    # panda reads Veh_V_ActlBrk unfiltered.
     standby = cruise_state == TRANSIT_LKA_CRUISE_STANDBY
     if not self.lka_continuation:
       self.lka_continuation = (self.lka_continuation_enabled and self.pcm_cruise_engaged_prev and standby and

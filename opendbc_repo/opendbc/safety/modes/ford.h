@@ -108,8 +108,14 @@ static bool ford_cancel_resume_button = false;
 // cruise buttons and LateralMotionControl all keep gating on controls_allowed alone.
 //
 // The latch is recomputed here rather than trusted from openpilot, and CarState runs
-// the identical conditions off the identical signals (opendbc/car/ford/carstate.py and
-// the TRANSIT_LKA_CONT_* constants in ford/values.py). The two must stay in step.
+// the identical entry/exit conditions off the identical signals (opendbc/car/ford/carstate.py
+// and the TRANSIT_LKA_CONT_* constants in ford/values.py). The two are deliberately
+// asymmetric, not required to mirror each other exactly: this side additionally clears the
+// latch on safety_rx_checks_invalid (see ford_rx_hook below), a guard the Python side does
+// not repeat. That is safe because a stale EngBrakeData stream already drives cp.can_valid
+// false on the openpilot side, which disengages via canError within about 1s regardless of
+// what carstate.py's own latch does - panda is simply the stricter of the two, not a second
+// copy that has to match bit for bit.
 static bool ford_lka_continuation_enabled = false;
 static bool ford_lka_continuation = false;
 #define FORD_LKA_CONT_ENTER_SPEED     7.0f
