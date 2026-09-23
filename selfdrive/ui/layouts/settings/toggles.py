@@ -28,7 +28,7 @@ DESCRIPTIONS = {
     "without a turn signal activated while driving over 31 mph (50 km/h)."
   ),
   "AlwaysOnDM": tr_noop("Enable driver monitoring even when openpilot is not engaged."),
-  "DisableDriverMonitoring": tr_noop("Disables driver monitoring and driver-camera recording. The physical camera remains active, but its frames are not analyzed or saved. You must stay attentive and remain responsible for safe operation. Changing this setting restarts the onroad processes."),  # noqa: E501
+  "DisableDriverMonitoring": tr_noop("Disables driver monitoring and driver-camera recording. The physical camera remains active, but its frames are not analyzed or saved. You must stay attentive and remain responsible for safe operation."),  # noqa: E501
   'RecordFront': tr_noop("Upload data from the driver facing camera and help improve the driver monitoring algorithm."),
   "IsRHD": tr_noop("Use right-hand-drive driver monitoring. This follows the auto-detected side until changed manually."),
   "IsMetric": tr_noop("Display speed in km/h instead of mph."),
@@ -304,8 +304,8 @@ class TogglesLayout(Widget):
     self._params.put("LongitudinalPersonality", button_index)
 
   def _set_driver_monitoring_disabled(self, disabled: bool):
-    self._params.put_bool("DisableDriverMonitoring", disabled, block=True)
-    self._params.put_bool("OnroadCycleRequested", True, block=True)
+    self._params.put_bool("DisableDriverMonitoring", disabled)
+    self._params.put_bool("OnroadCycleRequested", True)
 
   def _update_record_front_toggle(self):
     if "RecordFront" not in self._locked_toggles:
