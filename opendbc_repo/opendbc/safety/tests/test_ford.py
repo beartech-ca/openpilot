@@ -767,6 +767,22 @@ class TestFordTransitLkaSafety(TestFordSafetyBase):
           with self.subTest(speed=speed, angle=angle):
             self.assertEqual(should_tx, self._tx(self._lka_angle_msg(2, 0.)))
 
+  def test_bound_uses_the_window_extreme_not_just_the_latest_sample(self):
+    # angle_meas is a 6-sample rolling window (struct sample_t): a big sample followed by
+    # one small one leaves values[0] small while .max still holds the big sample until it
+    # ages out. Checking values[0] alone would let a relative request through that is only
+    # safe measured off the stale latest sample, not off the window's own extreme -
+    # vehicle_speed.min is already used a few lines below for exactly this conservatism.
+    speed = 20.
+    self.safety.set_controls_allowed(1)
+    self._reset_speed_measurement(speed)
+    max_angle_can = int(self._max_lka_angle_deg(speed) * self.LKA_DEG_TO_CAN) + 1
+    big_angle = (max_angle_can + 40) / self.LKA_DEG_TO_CAN  # comfortably past the ceiling alone
+    self._rx(self._pinion_angle_msg(big_angle))
+    self._rx(self._pinion_angle_msg(0.0))  # latest sample now reads ~0; .max still holds big_angle
+    assert not self._tx(self._lka_angle_msg(2, 0.)), \
+      "accepted a relative request the window's own max angle sample puts past the lateral accel ceiling"
+
   def test_relative_request_magnitude(self):
     # BOUND 1. LaRefAng_No_Req is a relative correction, and its 12-bit encoding already
     # confines it to -5.867..+5.864 deg. The bound is repeated in the safety to catch

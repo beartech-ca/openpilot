@@ -383,14 +383,17 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
 
         // ISO lateral accel limit on the reconstructed absolute target: same fudged
         // speed, same vehicle model helpers and ceiling as steer_angle_cmd_checks_vm. This
-        // is what stops a sustained maximum relative request winding the wheel up.
-        const int desired_angle = angle_meas.values[0] + rel_tenths;
+        // is what stops a sustained maximum relative request winding the wheel up. Checked
+        // against both ends of angle_meas's rolling window, matching this file's own
+        // min/max convention (e.g. lateral.h's inactive-angle and angle-error bounds):
+        // values[0] alone is just the latest sample and would skip the window extreme.
         const float fudged_speed = SAFETY_MAX((vehicle_speed.min / VEHICLE_SPEED_FACTOR) - 1.0, 1.0);
         const float curvature_factor = get_curvature_factor(fudged_speed, FORD_LKA_STEERING_PARAMS);
         const float max_curvature = FORD_LKA_MAX_LATERAL_ACCEL / (fudged_speed * fudged_speed);
         const float max_angle = get_angle_from_curvature(max_curvature, curvature_factor, FORD_LKA_STEERING_PARAMS);
         const int max_angle_can = (int)((max_angle * FORD_LKA_DEG_TO_CAN) + 1.0f);
-        violation |= safety_max_limit_check(desired_angle, max_angle_can, -max_angle_can);
+        violation |= safety_max_limit_check(angle_meas.min + rel_tenths, max_angle_can, -max_angle_can);
+        violation |= safety_max_limit_check(angle_meas.max + rel_tenths, max_angle_can, -max_angle_can);
 
         // real time rate limit: the PSCM's own ramp was measured against a 33Hz stream
         violation |= rt_angle_rate_limit_check(FORD_LKA_RT_LIMITS);
