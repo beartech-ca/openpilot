@@ -48,3 +48,4 @@ def test_prime_home_screen_shows_neither_pairing_prompt_nor_subscription_claim()
     state.prime_type = frozen_prime_type
     assert state.is_paired() is True  # no "Finish Setup / Pair your device" prompt
     assert state.is_prime() is False  # no "SUBSCRIBED / comma prime" claim
+    assert state.get_type() == PrimeType.NONE  # network.py:266 shows GSM/cellular settings
