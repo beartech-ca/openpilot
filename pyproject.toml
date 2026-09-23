@@ -156,7 +156,27 @@ allow-direct-references = true
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--ignore=openpilot/ --ignore=opendbc/ --ignore=panda/ --ignore=rednose_repo/ --ignore=tinygrad_repo/ --ignore=teleoprtc_repo/ --ignore=msgq/  -Werror --strict-config --strict-markers --durations=10 -n auto --dist=loadgroup"
+addopts = "--ignore=openpilot/ --ignore=opendbc/ --ignore=panda/ --ignore=rednose_repo/ --ignore=tinygrad_repo/ --ignore=teleoprtc_repo/ --ignore=msgq/  --strict-config --strict-markers --durations=10 -n auto --dist=loadgroup"
+# "-Werror" used to live in addopts as a bare -W flag. pytest treats -W (however it is
+# supplied) as a cmdline filter, and cmdline filters always take precedence over the
+# filterwarnings list below regardless of list order (see _pytest.config.apply_warning_filters:
+# ini filters are applied first, cmdline filters last, and last-applied wins), so a -W-based
+# -Werror can never be selectively overridden from here. Expressing the same default as the
+# first filterwarnings entry instead keeps -Werror's effect but lets a later, more specific
+# entry in this same list take priority over it.
+filterwarnings = [
+  "error",
+  # starpilot/third_party/reactivex is vendored, unmodified third-party code. On
+  # Python 3.12 it calls the now-deprecated datetime.datetime.utcfromtimestamp() at
+  # import time (starpilot/third_party/reactivex/internal/constants.py), which the
+  # "error" filter above promotes to a collection error. Its importer
+  # (starpilot/system/starpilot_stats.py) puts third_party/ on sys.path directly, so
+  # this loads as the top-level module "reactivex", not
+  # "openpilot.starpilot.third_party.reactivex" -- confirmed via sys.modules at import
+  # time. Ignore only that message from that module so "error" still applies to
+  # everything else, including the rest of starpilot.
+  "ignore:datetime\\.datetime\\.utcfromtimestamp\\(\\) is deprecated.*:DeprecationWarning:reactivex\\.internal\\.constants",
+]
 cpp_files = "test_*"
 cpp_harness = "selfdrive/test/cpp_harness.py"
 python_files = "test_*.py"
