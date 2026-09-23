@@ -1268,6 +1268,27 @@ class TestFordTransitLkaContinuation(TestFordTransitLkaSafety):
     self._feed(self.CRUISE_OFF, 3.0)
     assert not self._steers(), "latch survived cruise being switched off"
 
+  def test_stale_eng_brake_data_releases_it(self):
+    """Finding 1: EngBrakeData (0x165) going stale -- one ECU dropping out, not
+    necessarily a dead bus -- must not let the latch outlive the message stream that
+    defines it. lat_allowed = controls_allowed || ford_lka_continuation would otherwise
+    bypass panda's only protection against a stale rx stream, which normally acts
+    through controls_allowed = false (safety_tick).
+
+    _feed() never advances the mock clock, so no other test in this class reaches this
+    path: every rx check's last_timestamp stays near 0 throughout.
+    """
+    self._decelerate_into_standby()
+    assert self._steers(), "must be armed and steering before EngBrakeData goes stale"
+
+    # EngBrakeData is checked at 10 Hz; safety_tick's lag threshold is
+    # max(timestep * MAX_MISSED_MSGS, 1e6us) = 1e6us here (see safety_tick in safety.h).
+    self.safety.set_timer(int(2e6))
+    self.safety.safety_tick_current_safety_config()
+    self._rx(self._speed_msg(3.0))  # run an rx now that the rx checks are stale
+
+    assert not self._steers(), "continuation latch outlived the stale EngBrakeData stream"
+
   def test_does_not_relatch_once_released(self):
     self._decelerate_into_standby()
     self._feed(self.CRUISE_STANDBY, 3.0, brake=True)

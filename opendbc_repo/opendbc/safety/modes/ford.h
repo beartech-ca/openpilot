@@ -163,6 +163,16 @@ static const AngleSteeringLimits FORD_STEERING_LIMITS = FORD_LIMITS(false);
 static const AngleSteeringLimits FORD_EXTENDED_STEERING_LIMITS = FORD_EXTENDED_LIMITS(false);
 
 static void ford_rx_hook(const CANPacket_t *msg) {
+  // The continuation latch is written only from EngBrakeData (see below) and is
+  // otherwise never cleared, so a stale EngBrakeData stream (one ECU dropping out, not
+  // necessarily a dead bus) would leave it set indefinitely. That would bypass panda's
+  // only protection against a stale rx stream, which normally acts through
+  // controls_allowed = false (safety_tick, on the same safety_rx_checks_invalid signal).
+  // Clear the latch here so it can never outlive a valid rx stream.
+  if (safety_rx_checks_invalid) {
+    ford_lka_continuation = false;
+  }
+
   if (msg->bus == FORD_MAIN_BUS) {
     // Update in motion state from standstill signal
     if (msg->addr == FORD_DesiredTorqBrk) {
