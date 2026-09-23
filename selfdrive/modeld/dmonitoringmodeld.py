@@ -39,7 +39,7 @@ MODEL_LAB_DMONITORING_CORES = [0, 1, 2, 3]
 _DM = DRIVER_MONITOR_SETTINGS()
 
 
-def get_attentive_packet(frame_id: int, calib: np.ndarray):
+def get_attentive_packet(frame_id: int, calib: np.ndarray, wheel_on_right: bool):
   """A driverStateV2 describing a driver looking straight ahead with their eyes open.
 
   Published in place of the model's own output while DisableDriverMonitoring is set, so that
@@ -56,6 +56,14 @@ def get_attentive_packet(frame_id: int, calib: np.ndarray):
 
   Standard deviations are zero, under _HI_STD_THRESHOLD so the pose reads as low-std and
   under _DCAM_UNCERTAIN_ALERT_THRESHOLD so the camera never reads as uncertain.
+
+  wheelOnRightProb feeds policy.py's wheelpos_offsetter on every frame above
+  _WHEELPOS_CALIB_MIN_SPEED (faceProb below is 1.0, so the gate always passes here), and its
+  filtered mean is what dmonitoringd.py periodically persists back into IsRhdDetected/IsRHD.
+  A constant 0.5 is not neutral to that learner - it is exactly its own decision threshold - so
+  the filtered mean converges on it and forces wheel_on_right to a fixed False, silently
+  rewriting the saved side from fabricated data. Publish the side already saved instead, so the
+  learner is self-consistent and the periodic persist is a genuine no-op.
   """
   msg = messaging.new_message('driverStateV2', valid=True)
   ds = msg.driverStateV2
@@ -63,7 +71,7 @@ def get_attentive_packet(frame_id: int, calib: np.ndarray):
   ds.modelExecutionTime = 0.0
   ds.gpuExecutionTime = 0.0
   ds.rawPredictions = b''
-  ds.wheelOnRightProb = 0.5
+  ds.wheelOnRightProb = 1.0 if wheel_on_right else 0.0
   orientation = [float(_DM._PITCH_NATURAL_OFFSET + calib[1]),
                  float(-(_DM._YAW_NATURAL_OFFSET + calib[2])), 0.0]
   for side in (ds.leftDriverData, ds.rightDriverData):
@@ -211,6 +219,9 @@ def main():
   pm = PubMaster(["driverStateV2"])
   params = Params()
   dm_disabled = params.get_bool("DisableDriverMonitoring")
+  # Read once at startup, not per frame: unlike DisableDriverMonitoring this isn't a live
+  # toggle a user flips while driving, it's dmonitoringd.py's own last-saved side.
+  wheel_on_right_saved = params.get_bool("IsRhdDetected")
   calib = np.zeros(model.numpy_inputs["calib"].size, dtype=np.float32)
   model_transform = None
 
@@ -235,7 +246,7 @@ def main():
     if vipc_client.frame_id % 40 == 1:
       dm_disabled = params.get_bool("DisableDriverMonitoring")
     if dm_disabled:
-      pm.send("driverStateV2", get_attentive_packet(vipc_client.frame_id, calib))
+      pm.send("driverStateV2", get_attentive_packet(vipc_client.frame_id, calib, wheel_on_right_saved))
       continue
 
     start = time.perf_counter()
