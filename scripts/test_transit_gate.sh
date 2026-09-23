@@ -112,13 +112,21 @@ STARPILOT_REGRESSION_SUITES=(
 # BearTransit/main/.superpowers/sdd/final-review-fixes-report.md's own "-Werror run"
 # section. Deselect exactly these two so the gate reports real regressions instead of
 # this known environmental one; a device/CI run on real Linux hardware would not need
-# this exclusion, so remove it if this script is ever run there.
-BOOTLOG_EXEC_FORMAT_DESELECTS=(
-  --deselect "system/manager/test/test_manager.py::TestManager::test_manager_prepare"
-  --deselect "system/manager/test/test_manager.py::TestManager::test_set_params_with_default_value"
-)
-# 146 passed, 1 skipped: the 148 passed, 1 skipped documented baseline
-# (final-review-fixes-report.md) minus the 2 tests deselected above.
-run_group_with_floor starpilot-regression 146 "$PY" -m pytest "${STARPILOT_REGRESSION_SUITES[@]}" "${BOOTLOG_EXEC_FORMAT_DESELECTS[@]}" -q
+# this exclusion, so it is applied only when running on Darwin (see below).
+# Applied only on macOS: on Linux -- the device, or CI -- ./bootlog execs normally and
+# both tests must run, so the gate is stricter there rather than silently weaker.
+if [ "$(uname -s)" = "Darwin" ]; then
+  BOOTLOG_EXEC_FORMAT_DESELECTS=(
+    --deselect "system/manager/test/test_manager.py::TestManager::test_manager_prepare"
+    --deselect "system/manager/test/test_manager.py::TestManager::test_set_params_with_default_value"
+  )
+  # 146 passed, 1 skipped: the 148 passed, 1 skipped documented baseline
+  # (final-review-fixes-report.md) minus the 2 tests deselected above.
+  STARPILOT_REGRESSION_FLOOR=146
+else
+  BOOTLOG_EXEC_FORMAT_DESELECTS=()
+  STARPILOT_REGRESSION_FLOOR=148
+fi
+run_group_with_floor starpilot-regression "$STARPILOT_REGRESSION_FLOOR" "$PY" -m pytest "${STARPILOT_REGRESSION_SUITES[@]}" "${BOOTLOG_EXEC_FORMAT_DESELECTS[@]}" -q
 
 exit "$FAILED"
