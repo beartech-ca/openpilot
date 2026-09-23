@@ -451,15 +451,15 @@ class TestTransitInterface:
     assert int(TransitLkaContinuation.ON) == 1
 
 
+import itertools
 import math
 
 from opendbc.can import CANParser
-from opendbc.car import DT_CTRL, structs
-from opendbc.car.car_helpers import interfaces
-from opendbc.car.ford.carcontroller import CarController, TransitLkaState
+from opendbc.car import structs
+from opendbc.car.common.conversions import Conversions as CV
+from opendbc.car.ford.carcontroller import TransitLkaState
 from opendbc.car.ford.carstate import CarState
-from opendbc.car.ford.values import (DBC, TRANSIT_LKA_CONT_ENTER_SPEED, TRANSIT_LKA_CONT_EXIT_SPEED_HIGH,
-                                     TRANSIT_LKA_CONT_EXIT_SPEED_LOW)
+from opendbc.car.ford.values import DBC
 
 
 def _transit_interface(toggles=None, alpha_long=False):
@@ -471,11 +471,6 @@ def _transit_interface(toggles=None, alpha_long=False):
   car_interface = CarInterface(CP, FPCP)
   car_interface.update([], toggles)
   return car_interface, toggles
-
-
-def _build_transit_controller(toggles=None):
-  CP = _transit_params(toggles=toggles)
-  return CarController({Bus.pt: DBC[CAR.FORD_TRANSIT_MK5][Bus.pt]}, CP)
 
 
 def _decode(message, addr, dat):
@@ -636,10 +631,16 @@ class TestTransitLkaSwitchesAreLive:
 
 
 class TestTransitLkaAvailability:
+  """LaActAvail_D_Actl is not in get_can_parsers' pt list on this (non-CAN-FD) platform; CarState
+  registers Lane_Assist_Data3_FD1 lazily on first cp.vl access, which _transit_interface's setup
+  update() already does, so a frame sent on any later update() is parsed normally."""
+
   @staticmethod
-  def _lane_assist_data1_while(available):
+  def _lane_assist_data1_while(la_act_avail):
     car_interface, toggles = _transit_interface()
-    car_interface.CS.lkas_available = available
+    packer = CANPacker(DBC[CAR.FORD_TRANSIT_MK5][Bus.pt])
+    msg = packer.make_can_msg("Lane_Assist_Data3_FD1", 0, {"LaActAvail_D_Actl": la_act_avail})
+    car_interface.update([(1_000_000_000, [msg])], toggles)
     CC = structs.CarControl()
     CC.enabled = True
     CC.latActive = True
@@ -647,14 +648,23 @@ class TestTransitLkaAvailability:
     return [_decode("Lane_Assist_Data1", 0x3CA, dat) for dat in _frames(car_interface, toggles, CC.as_reader(), 0x3CA)]
 
   def test_a_suppressed_pscm_gets_an_empty_frame(self):
-    for v in self._lane_assist_data1_while(False):
+    for v in self._lane_assist_data1_while(0):
       assert v["LkaActvStats_D2_Req"] == 0
       assert v["LaRefAng_No_Req"] == 0.0
 
   def test_an_offering_pscm_gets_the_request(self):
-    seen = self._lane_assist_data1_while(True)
+    seen = self._lane_assist_data1_while(3)
     assert any(v["LkaActvStats_D2_Req"] != 0 for v in seen)
     assert any(abs(v["LaRefAng_No_Req"]) > 1.0 for v in seen)
+
+  def test_state_2_is_now_accepted(self):
+    # TRANSIT_LKA_AVAIL_VALUES == (2, 3) widened this from the shipped ==3-only check.
+    seen = self._lane_assist_data1_while(2)
+    assert any(v["LkaActvStats_D2_Req"] != 0 for v in seen)
+
+  def test_state_1_is_still_suppressed(self):
+    seen = self._lane_assist_data1_while(1)
+    assert all(v["LkaActvStats_D2_Req"] == 0 for v in seen)
 
 
 class TestTransitLkaContinuation:
@@ -665,48 +675,58 @@ class TestTransitLkaContinuation:
     toggles = _transit_toggles(transit_lka_continuation=on)
     CP = _transit_params(toggles=toggles)
     FPCP = CarInterface.get_starpilot_params(CAR.FORD_TRANSIT_MK5, {0: {0x176: 8}, 1: {}, 2: {}}, [], CP, toggles)
-    return CarState(CP, FPCP)
+    cs = CarState(CP, FPCP)
+    can_parsers = cs.get_can_parsers(CP)
+    return cs, can_parsers, toggles
 
   @staticmethod
-  def _step(cs, cruise_state, speed, brake=False):
-    """One update of just the latch, driven by the three signals panda also reads."""
-    ret = structs.CarState()
-    ret.vEgoRaw = speed
-    ret.brakePressed = brake
-    pcm_engaged = cruise_state in (4, 5)
-    standby = cruise_state == 3
-    if not cs.lka_continuation:
-      cs.lka_continuation = (cs.lka_continuation_enabled and cs.pcm_cruise_engaged_prev and standby and
-                             ret.vEgoRaw < TRANSIT_LKA_CONT_ENTER_SPEED and not ret.brakePressed)
-    else:
-      cs.lka_continuation = (standby and not ret.brakePressed and
-                             TRANSIT_LKA_CONT_EXIT_SPEED_LOW < ret.vEgoRaw < TRANSIT_LKA_CONT_EXIT_SPEED_HIGH)
-    cs.pcm_cruise_engaged_prev = pcm_engaged
-    return pcm_engaged or cs.lka_continuation
+  def _driver(cs, can_parsers, toggles):
+    """Returns a step(cruise_state, speed, brake) closure that drives CarState.update with
+    synthesized EngBrakeData/BrakeSysFeatures frames -- the same three signals panda's own
+    latch reads -- and returns the real ret.cruiseState.enabled, not a private copy of it."""
+    packer = CANPacker(DBC[CAR.FORD_TRANSIT_MK5][Bus.pt])
+    nanos = itertools.count(100_000_000, 100_000_000)
+
+    def step(cruise_state, speed, brake=False):
+      frames = [
+        packer.make_can_msg("EngBrakeData", 0, {
+          "CcStat_D_Actl": cruise_state,
+          "BpedDrvAppl_D_Actl": 2 if brake else 0,
+        }),
+        packer.make_can_msg("BrakeSysFeatures", 0, {"Veh_V_ActlBrk": speed / CV.KPH_TO_MS}),
+      ]
+      can_parsers[Bus.pt].update([(next(nanos), frames)])
+      ret, _ = cs.update(can_parsers, toggles)
+      return ret.cruiseState.enabled
+
+    return step
 
   def test_enabled_comes_from_safety_param_not_toggles(self):
-    assert self._carstate(True).lka_continuation_enabled is True
-    assert self._carstate(False).lka_continuation_enabled is False
+    assert self._carstate(True)[0].lka_continuation_enabled is True
+    assert self._carstate(False)[0].lka_continuation_enabled is False
 
   def test_latches_on_the_cancel_and_holds_down_to_walking_pace(self):
-    cs = self._carstate(True)
-    assert self._step(cs, self.ENGAGED, 12.0)
-    assert self._step(cs, self.ENGAGED, 5.2)
-    assert self._step(cs, self.STANDBY, 4.9)
+    cs, can_parsers, toggles = self._carstate(True)
+    step = self._driver(cs, can_parsers, toggles)
+    assert step(self.ENGAGED, 12.0)
+    assert step(self.ENGAGED, 5.2)
+    assert step(self.STANDBY, 4.9)
     assert cs.lka_continuation
     for v in (4.0, 3.0, 2.0, 1.0, 0.6):
-      assert self._step(cs, self.STANDBY, v), f"dropped at {v} m/s"
+      assert step(self.STANDBY, v), f"dropped at {v} m/s"
 
   def test_never_latches_from_a_standing_start_in_standby(self):
-    cs = self._carstate(True)
+    cs, can_parsers, toggles = self._carstate(True)
+    step = self._driver(cs, can_parsers, toggles)
     for _ in range(5):
-      assert not self._step(cs, self.STANDBY, 3.0)
+      assert not step(self.STANDBY, 3.0)
     assert not cs.lka_continuation
 
   def test_off_is_the_shipped_behaviour(self):
-    cs = self._carstate(False)
-    assert self._step(cs, self.ENGAGED, 6.0)
-    assert not self._step(cs, self.STANDBY, 4.5)
+    cs, can_parsers, toggles = self._carstate(False)
+    step = self._driver(cs, can_parsers, toggles)
+    assert step(self.ENGAGED, 6.0)
+    assert not step(self.STANDBY, 4.5)
 
   @pytest.mark.parametrize(("what", "cruise_state", "speed", "brake"), [
     ("brake pressed", STANDBY, 3.0, True),
@@ -716,11 +736,12 @@ class TestTransitLkaContinuation:
     ("stopped", STANDBY, 0.2, False),
   ])
   def test_every_exit_condition_releases_the_latch(self, what, cruise_state, speed, brake):
-    cs = self._carstate(True)
-    self._step(cs, self.ENGAGED, 6.0)
-    self._step(cs, self.STANDBY, 4.5)
+    cs, can_parsers, toggles = self._carstate(True)
+    step = self._driver(cs, can_parsers, toggles)
+    step(self.ENGAGED, 6.0)
+    step(self.STANDBY, 4.5)
     assert cs.lka_continuation
-    self._step(cs, cruise_state, speed, brake)
+    step(cruise_state, speed, brake)
     assert not cs.lka_continuation, f"latch survived {what}"
 
   @staticmethod
@@ -728,7 +749,19 @@ class TestTransitLkaContinuation:
     toggles = _transit_toggles(transit_lka_continuation=True)
     car_interface, _ = _transit_interface(toggles, alpha_long=True)
     assert car_interface.CP.openpilotLongitudinalControl
-    car_interface.CS.lka_continuation = latched
+    if latched:
+      # Same arming sequence as test_latches_on_the_cancel_...: drive the real parse rather
+      # than poking CS.lka_continuation, so this test exercises the condition that triggers
+      # the ACCDATA suppression, not just the suppression itself.
+      packer = CANPacker(DBC[CAR.FORD_TRANSIT_MK5][Bus.pt])
+      for i, (cruise_state, speed) in enumerate(((TestTransitLkaContinuation.ENGAGED, 6.0),
+                                                  (TestTransitLkaContinuation.STANDBY, 4.5))):
+        frames = [
+          packer.make_can_msg("EngBrakeData", 0, {"CcStat_D_Actl": cruise_state, "BpedDrvAppl_D_Actl": 0}),
+          packer.make_can_msg("BrakeSysFeatures", 0, {"Veh_V_ActlBrk": speed / CV.KPH_TO_MS}),
+        ]
+        car_interface.update([((i + 1) * 100_000_000, frames)], toggles)
+    assert car_interface.CS.lka_continuation is latched
     CC = structs.CarControl()
     CC.enabled = True
     CC.longActive = True
