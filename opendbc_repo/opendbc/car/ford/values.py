@@ -305,7 +305,8 @@ class CAR(Platforms):
     wmis={'1FT'}, vds_codes={'ER4'}, years={MY_2024},
   )
   FORD_TRANSIT_MK5 = FordLKASteeringPlatformConfig(
-    [FordCarDocs("Ford Transit 2022-25", "Lane Keeping Aid")],
+    [FordCarDocs("Ford Transit 2022", "Lane Keeping Aid")],
+    # fingerprints.py still lists the 2025 firmware; a 2025 van that matches gets these 2022 specs.
     # 2022 T-350 AWD cargo van, long wheelbase high roof, the van this branch is driven on.
     # mass 2864 = 3000 kg as driven (owner-reported, tools aboard) minus the 136 kg
     #   STD_CARGO_KG that interfaces.py adds; the curb weight would understate it by 12%.
