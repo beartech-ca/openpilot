@@ -41,6 +41,13 @@ class FordStockCruiseButton:
     return self.cancel, self.resume
 
 
+# Retained unused for upstream-merge parity: their only callers were in the LKA_STEERING
+# lateral block this fork's Transit MK5 (its only LKA_STEERING platform) replaced with
+# create_transit_lka_msg, so neither function is reached here. The 13 curvature Ford
+# platforms this fork tracks from StarPilot still call the equivalent limiting in
+# starpilot/car/ford/lateral.py:382-388; deleting these would widen every future merge
+# conflict against that upstream for no local benefit. The Transit's own request is bounded
+# instead by the +-5.8 deg clip in create_transit_lka_msg (fordcan.py:66-67).
 def apply_ford_angle(desired_angle_deg: float, current_angle_deg: float) -> float:
   relative_angle = desired_angle_deg - current_angle_deg
   return float(np.clip(relative_angle, -5.8, 5.8))

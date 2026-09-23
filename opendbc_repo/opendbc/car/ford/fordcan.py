@@ -99,6 +99,11 @@ def create_lat_ctl_msg(packer, CAN: CanBus, lat_active: bool, path_offset: float
   Frequency is 20Hz.
   """
 
+  # stock_lmc is retained unused for upstream-merge parity: this fork's only LKA_STEERING
+  # platform (Transit MK5) calls this with the default None (carcontroller.py's LKA_STEERING
+  # block always sends an inactive heartbeat here) and steers through create_transit_lka_msg
+  # instead, so this branch is never reached. Deleting it would widen every future merge
+  # conflict against StarPilot upstream, which still uses it on curvature platforms.
   if stock_lmc is not None:
     values = {
       "LatCtlRng_L_Max": stock_lmc["LatCtlRng_L_Max"],
