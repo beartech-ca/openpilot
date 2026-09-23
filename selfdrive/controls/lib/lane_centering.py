@@ -100,8 +100,10 @@ class LaneCenteringController:
     if not valid:
       # _integral is deliberately held here, not reset: it accumulates a vehicle-borne standing
       # pull, and a lane-line dropout says nothing about whether that pull is still there.
-      # Resetting on every dropout would force a 13-40 s re-learn (at 0.3-0.1 m of error) each
-      # time, so the term would rarely reach useful authority. This is not the proportional
+      # Resetting on every dropout would force a 13-40 s re-learn (at 0.3-0.1 m of error, at
+      # 20 m/s; the term scales with 1/lookahead**2, so it is faster at low speed and slower
+      # at high speed - about a 19x spread across the 8-35 m/s clamped range) each time, so
+      # the term would rarely reach useful authority. This is not the proportional
       # path's fade-on-output behavior: before this change the controller carried no persistent
       # state at all, and _correction fades here because it is an output being released, while
       # the proportional contribution itself is recomputed from scratch every frame. _integral is

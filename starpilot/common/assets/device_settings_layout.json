@@ -5087,7 +5087,7 @@
       {
         "key": "LaneCenteringIntegralGain",
         "label": "Lane Centering Integral Gain",
-        "description": "How fast a standing offset from the lane center is worked off. 0 disables the integral term and leaves lane centering purely proportional. The default 0.03 removes a 0.1 m standing error over roughly ten seconds.",
+        "description": "How fast a standing offset from the lane center is worked off. 0 disables the integral term and leaves lane centering purely proportional. The default 0.03 needs roughly 40 s to remove a 0.1 m standing error at 20 m/s; it is markedly faster at low speed and slower at high speed, since the rate scales with 1/lookahead² - about a 19x spread end to end.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.0,
