@@ -101,10 +101,22 @@ class PrimeState:
       return self.prime_type
 
   def is_prime(self) -> bool:
+    # Never claim a subscription that can no longer be verified or revoked: with Athena
+    # disabled, prime_type is frozen at whatever _load_initial_state() read and can never
+    # advance, so a persisted tier from a previous build must not read as "subscribed".
+    if not ATHENA_ENABLED:
+      return False
     with self._lock:
       return bool(self.prime_type > PrimeType.NONE)
 
   def is_paired(self) -> bool:
+    # With Athena disabled this fork never registers a pairing with comma's backend, so
+    # prime_type is frozen at whatever _load_initial_state() read (often UNKNOWN) and can
+    # never resolve to paired or unpaired. Report paired so the setup/pairing UI -- an
+    # unclosable flow whose only exit condition (is_paired() going true) would otherwise
+    # never occur -- does not permanently prompt for a backend this fork no longer talks to.
+    if not ATHENA_ENABLED:
+      return True
     with self._lock:
       return self.prime_type > PrimeType.UNPAIRED
 
