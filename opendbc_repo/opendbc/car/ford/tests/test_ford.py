@@ -552,6 +552,41 @@ class TestTransitLkaIntervention:
     assert s.update(4.5, 4.7, 0.0)[0] == 4
 
 
+class TestTransitLkaHysteresisResetsOnSwitchChange:
+  """set_selection() is how the controller now applies a live switch change (carcontroller.py's
+  LKA_STEERING block calls it once per LKA frame). PRESET's own if/elif only change state on
+  crossing a threshold, so flipping into PRESET from a position that forced increasing/fast
+  True must not leave that True latched through the neutral band."""
+
+  def test_switching_into_preset_does_not_inherit_increasing(self):
+    s = TransitLkaState(TransitLkaIntervention.INCREASING, TransitLkaRamp.SLOW)
+    s.update(0.5, 0.5, 0.0)  # INCREASING forces self.increasing True every frame
+    s.set_selection(TransitLkaIntervention.PRESET, TransitLkaRamp.SLOW)
+    # Inside the neutral band: not >= the entry pair (req>5.0 and desired>=5.2), not the
+    # exit pair either (req<4.6 and desired<4.8), so a latched increasing would persist.
+    action, _ = s.update(4.8, 4.9, 0.0)
+    assert action == 4, "PRESET inherited INCREASING's escalated action across the switch flip"
+
+  def test_switching_into_preset_does_not_inherit_fast(self):
+    s = TransitLkaState(TransitLkaIntervention.STANDARD, TransitLkaRamp.FAST)
+    s.update(0.5, 0.5, 0.0)  # FAST forces self.fast True every frame
+    s.set_selection(TransitLkaIntervention.STANDARD, TransitLkaRamp.PRESET)
+    # Inside the neutral band: not >= RAMP_ENTER_REQ (1.8), not < RAMP_EXIT_REQ (1.5), so a
+    # latched fast would persist.
+    _, ramp_type = s.update(1.6, 1.6, 0.0)
+    assert ramp_type == 0, "PRESET inherited FAST's ramp across the switch flip"
+
+  def test_unchanged_selection_does_not_reset_mid_latch(self):
+    # set_selection is called every LKA frame even when nothing changed; it must not
+    # clobber a PRESET latch that is legitimately holding mid-cycle.
+    s = TransitLkaState(TransitLkaIntervention.PRESET, TransitLkaRamp.SLOW)
+    s.update(5.5, 6.0, 0.0)
+    assert s.increasing
+    s.set_selection(TransitLkaIntervention.PRESET, TransitLkaRamp.SLOW)
+    action, _ = s.update(4.8, 4.9, 0.0)  # neutral band: still escalated if truly unchanged
+    assert action == 6
+
+
 class TestTransitLkaRamp:
   def test_preset_enters_on_angle(self):
     s = TransitLkaState(TransitLkaIntervention.STANDARD, TransitLkaRamp.PRESET)

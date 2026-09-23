@@ -123,6 +123,25 @@ class TransitLkaState:
     self.fast = False
     self.rate_filtered = 0.0
 
+  def set_selection(self, intervention: TransitLkaIntervention, ramp: TransitLkaRamp) -> None:
+    """Update the live switch positions, read fresh from starpilot_toggles every LKA frame.
+
+    Only PRESET runs hysteresis (see update() below); the other positions overwrite
+    increasing/fast outright every frame, so they can never carry stale state. PRESET's
+    own if/elif only change state on crossing a threshold, so switching INTO PRESET would
+    otherwise inherit whatever increasing/fast the prior selection left behind, and the
+    three positions exist to be compared live on the road - the first seconds after every
+    flip must reflect this switch's own selection, not the previous one's. Reset the
+    latch only for whichever switch actually changed position, to the position's own
+    unescalated starting point, and only on the frame the change happens.
+    """
+    if intervention != self.intervention:
+      self.intervention = intervention
+      self.increasing = intervention == TransitLkaIntervention.INCREASING
+    if ramp != self.ramp:
+      self.ramp = ramp
+      self.fast = ramp == TransitLkaRamp.FAST
+
   def update(self, req_deg: float, desired_deg: float, demand_rate_dps: float) -> tuple[int, int]:
     req, desired = abs(req_deg), abs(desired_deg)
 
@@ -229,7 +248,7 @@ class CarController(CarControllerBase):
 
       if (self.frame % CarControllerParams.LKA_STEP) == 0:
         # the two live switches; a change while driving takes effect on the next frame
-        self.transit_lka.intervention, self.transit_lka.ramp = transit_lka_settings_from_toggles(starpilot_toggles)
+        self.transit_lka.set_selection(*transit_lka_settings_from_toggles(starpilot_toggles))
 
         lka_active = CC.latActive and CS.lkas_available
         apply_angle = 0.0
