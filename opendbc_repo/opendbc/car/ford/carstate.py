@@ -6,7 +6,10 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.ford.fordcan import CanBus
-from opendbc.car.ford.values import DBC, CarControllerParams, FordFlags
+from opendbc.car.ford.values import (DBC, CarControllerParams, FordFlags, FordSafetyFlags, TRANSIT_LKA_AVAIL_VALUES,
+                                     TRANSIT_LKA_CONT_ENTER_SPEED, TRANSIT_LKA_CONT_EXIT_SPEED_HIGH,
+                                     TRANSIT_LKA_CONT_EXIT_SPEED_LOW, TRANSIT_LKA_CRUISE_STANDBY,
+                                     TRANSIT_STEER_DRIVER_ALLOWANCE)
 from opendbc.car.gps import get_car_gps_config
 from opendbc.car.interfaces import CarStateBase
 
@@ -30,7 +33,12 @@ class CarState(CarStateBase):
     self.distance_button = 0
     self.lc_button = 0
     self.lkas_available = False
-    self.lateral_motion_control = None
+    # Continuation is consumed from safetyParam, which get_params derived from the toggle:
+    # panda reads the identical bit, so the two latches can never be armed differently.
+    self.lka_continuation_enabled = bool(CP.flags & FordFlags.LKA_STEERING) and \
+      bool(CP.safetyConfigs[-1].safetyParam & FordSafetyFlags.LKA_CONTINUATION)
+    self.lka_continuation = False
+    self.pcm_cruise_engaged_prev = False
     self.lateral_control_status = None
     self.steering_angle_offset_deg = 0.0
     self.car_gps_config = get_car_gps_config(CP)
@@ -106,7 +114,8 @@ class CarState(CarStateBase):
     else:
       ret.steeringAngleDeg = cp.vl["SteeringPinion_Data"]["StePinComp_An_Est"]
     ret.steeringTorque = cp.vl["EPAS_INFO"]["SteeringColumnTorque"]
-    ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > CarControllerParams.STEER_DRIVER_ALLOWANCE, 5)
+    driver_allowance = TRANSIT_STEER_DRIVER_ALLOWANCE if self.CP.flags & FordFlags.LKA_STEERING else CarControllerParams.STEER_DRIVER_ALLOWANCE
+    ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > driver_allowance, 5)
     ret.steerFaultTemporary = cp.vl["EPAS_INFO"]["EPAS_Failure"] == 1
     ret.steerFaultPermanent = cp.vl["EPAS_INFO"]["EPAS_Failure"] in (2, 3)
     ret.espDisabled = cp.vl["Cluster_Info1_FD1"]["DrvSlipCtlMde_D_Rq"] != 0  # 0 is default mode
@@ -120,7 +129,27 @@ class CarState(CarStateBase):
     is_metric = cp.vl["INSTRUMENT_PANEL"]["METRIC_UNITS"] == 1 if not self.CP.flags & FordFlags.CANFD else \
       cp_cam.vl["IPMA_Data2"]["IsaVLimUnit_D_Rq"] == 1
     ret.cruiseState.speed = cp.vl["EngBrakeData"]["Veh_V_DsplyCcSet"] * (CV.KPH_TO_MS if is_metric else CV.MPH_TO_MS)
-    ret.cruiseState.enabled = cp.vl["EngBrakeData"]["CcStat_D_Actl"] in (4, 5)
+
+    cruise_state = cp.vl["EngBrakeData"]["CcStat_D_Actl"]
+    pcm_cruise_engaged = cruise_state in (4, 5)
+
+    # Lateral continuation: the PCM leaves Active for Standby at about 17.8 km/h and every
+    # command stops, lateral included. Latch on that transition so Lane_Assist_Data1 keeps
+    # flowing below it. Panda recomputes the same latch from the same three signals
+    # (safety/modes/ford.h); thresholds and conditions must stay identical. vEgoRaw, not
+    # vEgo, because panda reads Veh_V_ActlBrk unfiltered.
+    standby = cruise_state == TRANSIT_LKA_CRUISE_STANDBY
+    if not self.lka_continuation:
+      self.lka_continuation = (self.lka_continuation_enabled and self.pcm_cruise_engaged_prev and standby and
+                               ret.vEgoRaw < TRANSIT_LKA_CONT_ENTER_SPEED and not ret.brakePressed)
+    else:
+      self.lka_continuation = (standby and not ret.brakePressed and
+                               TRANSIT_LKA_CONT_EXIT_SPEED_LOW < ret.vEgoRaw < TRANSIT_LKA_CONT_EXIT_SPEED_HIGH)
+    self.pcm_cruise_engaged_prev = pcm_cruise_engaged
+
+    # Holding enabled through the latch is what keeps selfdriveState active, and with it
+    # latActive - openpilot has no lateral-only engagement state to fall back on.
+    ret.cruiseState.enabled = pcm_cruise_engaged or self.lka_continuation
     ret.cruiseState.available = cp.vl["EngBrakeData"]["CcStat_D_Actl"] in (3, 4, 5)
     ret.cruiseState.nonAdaptive = cp.vl["Cluster_Info1_FD1"]["AccEnbl_B_RqDrv"] == 0
     ret.cruiseState.standstill = cp.vl["EngBrakeData"]["AccStopMde_D_Rq"] == 3
@@ -174,14 +203,14 @@ class CarState(CarStateBase):
     self.acc_tja_status_stock_values = cp_cam.vl["ACCDATA_3"]
     self.lkas_status_stock_values = cp_cam.vl["IPMA_Data"]
     if self.CP.flags & FordFlags.LKA_STEERING:
+      # LKA is offered in 3 and 2 only; in 1 and 0 the PSCM has suppressed it and commanding
+      # anyway both fails to steer and keeps it suppressed (TRANSIT_LKA_AVAIL_VALUES). The
+      # message is not registered in get_can_parsers on CAN platforms; CANParser registers
+      # it on first access, exactly as blue drove it.
       try:
-        self.lkas_available = cp.vl["Lane_Assist_Data3_FD1"]["LaActAvail_D_Actl"] == 3
+        self.lkas_available = cp.vl["Lane_Assist_Data3_FD1"]["LaActAvail_D_Actl"] in TRANSIT_LKA_AVAIL_VALUES
       except KeyError:
         self.lkas_available = False
-      try:
-        self.lateral_motion_control = cp_cam.vl["LateralMotionControl"]
-      except KeyError:
-        self.lateral_motion_control = None
 
     ret.buttonEvents = [
       *create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise}),
@@ -280,9 +309,6 @@ class CarState(CarStateBase):
         ("Side_Detect_L_Stat", 5),
         ("Side_Detect_R_Stat", 5),
       ]
-
-    if CP.flags & FordFlags.LKA_STEERING:
-      cam_messages += [("LateralMotionControl", 20)]
 
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).main),

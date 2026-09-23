@@ -4,7 +4,8 @@ from opendbc.can import CANPacker
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, structs
 from opendbc.car.lateral import ISO_LATERAL_ACCEL, apply_std_steer_angle_limits
 from opendbc.car.ford import fordcan
-from opendbc.car.ford.values import CarControllerParams, FordFlags
+from opendbc.car.ford.values import (CarControllerParams, FordFlags, TransitLkaIntervention, TransitLkaRamp,
+                                     transit_lka_settings_from_toggles)
 from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
 # This Ford extension boundary substantially adapts BluePilot bp-7.0 work. See the root CREDITS.md
 # (including Alan Polk's d0aac605f and db2bdff05) and THIRD_PARTY_NOTICES.md.
@@ -71,6 +72,81 @@ def apply_creep_compensation(accel: float, v_ego: float) -> float:
   return float(accel)
 
 
+# LkaActvStats_D2_Req values for a (positive request, negative request) pair, keyed by
+# whether the request is escalated: 1 IncrLeft, 2 StandLeft, 4 StandRight, 6 IncrRight.
+# The Left/Right in those names is the side of the lane the van is DEPARTING toward, not
+# the direction of the correction: the stock camera sends 4 "StandIntervRight" with the van
+# right of centre and its own LaRefAng_No_Req positive, i.e. a leftward correction.
+TRANSIT_LKA_ACTION = {
+  False: (4, 2),
+  True: (6, 1),
+}
+
+
+class TransitLkaState:
+  """Picks LkaActvStats_D2_Req and LaRampType_B_Req for each Lane_Assist_Data1 frame.
+
+  The PRESET position of each switch runs the hysteresis below, whose thresholds come from
+  46,577 recorded commanded frames across four routes.
+  """
+  DT = 1.0 / 33.0                 # Lane_Assist_Data1 is sent at 33Hz
+  DEADBAND_DEG = 0.1              # below this the wheel counts as centred
+
+  INTERV_ENTER_REQ = 5.0
+  INTERV_ENTER_DESIRED = 5.2
+  INTERV_EXIT_REQ = 4.6
+  INTERV_EXIT_DESIRED = 4.8
+
+  RAMP_ENTER_REQ = 1.8
+  RAMP_ENTER_RATE = 15.0
+  RAMP_EXIT_REQ = 1.5
+  RAMP_EXIT_RATE = 12.0
+  RAMP_RATE_TAU = 0.15            # raw demand rate chatters across the band
+
+  def __init__(self, intervention: TransitLkaIntervention, ramp: TransitLkaRamp):
+    self.intervention = intervention
+    self.ramp = ramp
+    self.increasing = False
+    self.fast = False
+    self.rate_filtered = 0.0
+
+  def reset(self) -> None:
+    self.increasing = False
+    self.fast = False
+    self.rate_filtered = 0.0
+
+  def update(self, req_deg: float, desired_deg: float, demand_rate_dps: float) -> tuple[int, int]:
+    req, desired = abs(req_deg), abs(desired_deg)
+
+    alpha = 1.0 - math.exp(-self.DT / self.RAMP_RATE_TAU)
+    self.rate_filtered += alpha * (abs(demand_rate_dps) - self.rate_filtered)
+
+    if self.intervention == TransitLkaIntervention.PRESET:
+      if req > self.INTERV_ENTER_REQ and desired >= self.INTERV_ENTER_DESIRED:
+        self.increasing = True
+      elif req < self.INTERV_EXIT_REQ and desired < self.INTERV_EXIT_DESIRED:
+        self.increasing = False
+    else:
+      self.increasing = self.intervention == TransitLkaIntervention.INCREASING
+
+    if self.ramp == TransitLkaRamp.PRESET:
+      if req >= self.RAMP_ENTER_REQ or self.rate_filtered >= self.RAMP_ENTER_RATE:
+        self.fast = True
+      elif req < self.RAMP_EXIT_REQ and self.rate_filtered < self.RAMP_EXIT_RATE:
+        self.fast = False
+    else:
+      self.fast = self.ramp == TransitLkaRamp.FAST
+
+    if req_deg > self.DEADBAND_DEG:
+      action = TRANSIT_LKA_ACTION[self.increasing][0]
+    elif req_deg < -self.DEADBAND_DEG:
+      action = TRANSIT_LKA_ACTION[self.increasing][1]
+    else:
+      action = 0
+
+    return action, int(self.fast)
+
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -78,7 +154,11 @@ class CarController(CarControllerBase):
     self.CAN = fordcan.CanBus(CP)
 
     self.apply_curvature_last = 0
-    self.apply_angle_last = 0
+    self.transit_lka = None
+    if CP.flags & FordFlags.LKA_STEERING:
+      self.transit_lka = TransitLkaState(TransitLkaIntervention.STANDARD, TransitLkaRamp.SLOW)
+      self.desired_angle_last = 0.0
+      self.lka_active_last = False
     self.accel = 0.0
     self.gas = 0.0
     self.brake_request = False
@@ -132,28 +212,35 @@ class CarController(CarControllerBase):
 
     ### lateral control ###
     if self.CP.flags & FordFlags.LKA_STEERING:
-      lka_active = CC.latActive and CS.lkas_available
-      if lka_active:
-        self.apply_angle_last = apply_ford_angle(actuators.steeringAngleDeg, CS.out.steeringAngleDeg)
-        current_curvature = -CS.out.yawRate / max(CS.out.vEgoRaw, 0.1)
-        self.apply_curvature_last = apply_ford_curvature_limits(actuators.curvature, self.apply_curvature_last, current_curvature,
-                                                                CS.out.vEgoRaw, 0., True, self.CP)
-      else:
-        self.apply_angle_last = 0.
-        self.apply_curvature_last = 0.
-
-      # Keep the stock LMC heartbeat present while steering through Lane_Assist_Data1.
+      # LKA_STEERING platforms steer through Lane_Assist_Data1 (0x3CA) below; the PSCM
+      # ignores LCA/TJA here. LateralMotionControl (0x3D3) shares limiter state with the
+      # 0x3CA angle check in panda, so it goes out as an always-inactive heartbeat and
+      # never with a steering request.
       if (self.frame % CarControllerParams.STEER_STEP) == 0:
-        can_sends.append(fordcan.create_lat_ctl_msg(self.packer, self.CAN, False, 0., 0., 0., 0.,
-                                                   stock_lmc=CS.lateral_motion_control))
+        can_sends.append(fordcan.create_lat_ctl_msg(self.packer, self.CAN, False, 0., 0., 0., 0.))
 
       if (self.frame % CarControllerParams.LKA_STEP) == 0:
-        direction = 0
+        # the two live switches; a change while driving takes effect on the next frame
+        self.transit_lka.intervention, self.transit_lka.ramp = transit_lka_settings_from_toggles(starpilot_toggles)
+
+        lka_active = CC.latActive and CS.lkas_available
+        apply_angle = 0.0
+        action, ramp_type = 0, 0
         if lka_active:
-          direction = 2 if CS.out.steeringAngleDeg > 0 else 4
-        ramp_type = 1 if abs(self.apply_angle_last) >= 5 else 0
-        can_sends.append(fordcan.create_lka_msg(self.packer, self.CAN, active=lka_active, apply_angle=self.apply_angle_last,
-                                               direction=direction, ramp_type=ramp_type, curvature=-self.apply_curvature_last))
+          apply_angle = actuators.steeringAngleDeg - CS.out.steeringAngleDeg
+          # demand_rate is only meaningful once desired_angle_last was itself sampled while
+          # active: on the first active frame the previous sample is the pre-engagement
+          # target and diffing against it would produce a spurious huge rate.
+          if self.lka_active_last:
+            demand_rate = (actuators.steeringAngleDeg - self.desired_angle_last) / DT_CTRL / CarControllerParams.LKA_STEP
+          else:
+            demand_rate = 0.0
+          action, ramp_type = self.transit_lka.update(apply_angle, actuators.steeringAngleDeg, demand_rate)
+        else:
+          self.transit_lka.reset()
+        self.desired_angle_last = actuators.steeringAngleDeg
+        self.lka_active_last = lka_active
+        can_sends.append(fordcan.create_transit_lka_msg(self.packer, self.CAN, lka_active, apply_angle, action, ramp_type))
     else:
       if (self.frame % CarControllerParams.STEER_STEP) == 0:
         lateral = self.ford_lateral.update(CC, CS, actuators) \
@@ -179,10 +266,20 @@ class CarController(CarControllerBase):
     ### longitudinal control ###
     # send acc msg at 50Hz
     if self.CP.openpilotLongitudinalControl and (self.frame % CarControllerParams.ACC_CONTROL_STEP) == 0:
+      # The lateral continuation latch holds openpilot engaged past the PCM's own cancel so
+      # it can keep steering. It must not keep asking for acceleration or braking there:
+      # the PCM reads Standby and panda still gates ACCDATA on controls_allowed.
+      long_active = CC.longActive and not CS.lka_continuation
+
       accel = actuators.accel
       gas = accel
+      if CS.lka_continuation:
+        # panda accepts exactly one AccBrkTot_A_Rq while controls_allowed is false, the
+        # inactive value; 0.0 m/s^2 is the request that encodes to it.
+        accel = 0.0
+        gas = 0.0
 
-      if CC.longActive:
+      if long_active:
         # Compensate for engine creep at low speed.
         # Either the ABS does not account for engine creep, or the correction is very slow
         # TODO: verify this applies to EV/hybrid
@@ -196,7 +293,7 @@ class CarController(CarControllerBase):
       gas = float(np.clip(gas, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
 
       # Both gas and accel are in m/s^2, accel is used solely for braking
-      if not CC.longActive or gas < CarControllerParams.MIN_GAS:
+      if not long_active or gas < CarControllerParams.MIN_GAS:
         gas = CarControllerParams.INACTIVE_GAS
 
       # PCM applies pitch compensation to gas/accel, but we need to compensate for the brake/pre-charge bits
@@ -205,14 +302,14 @@ class CarController(CarControllerBase):
         accel_due_to_pitch = math.sin(CC.orientationNED[1]) * ACCELERATION_DUE_TO_GRAVITY
 
       accel_pitch_compensated = accel + accel_due_to_pitch
-      if accel_pitch_compensated > 0.3 or not CC.longActive:
+      if accel_pitch_compensated > 0.3 or not long_active:
         self.brake_request = False
       elif accel_pitch_compensated < 0.0:
         self.brake_request = True
 
       stopping = CC.actuators.longControlState == LongCtrlState.stopping
       # TODO: look into using the actuators packet to send the desired speed
-      can_sends.append(fordcan.create_acc_msg(self.packer, self.CAN, CC.longActive, gas, accel, stopping, self.brake_request, v_ego_kph=V_CRUISE_MAX))
+      can_sends.append(fordcan.create_acc_msg(self.packer, self.CAN, long_active, gas, accel, stopping, self.brake_request, v_ego_kph=V_CRUISE_MAX))
 
       self.accel = accel
       self.gas = gas
@@ -245,8 +342,6 @@ class CarController(CarControllerBase):
     self.lead_distance_bars_last = hud_control.leadDistanceBars
 
     new_actuators = actuators.as_builder()
-    if self.CP.flags & FordFlags.LKA_STEERING:
-      new_actuators.steeringAngleDeg = self.apply_angle_last + CS.out.steeringAngleDeg
     new_actuators.curvature = self.apply_curvature_last
     new_actuators.accel = self.accel
     new_actuators.gas = self.gas

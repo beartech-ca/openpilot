@@ -35,32 +35,41 @@ def calculate_lat_ctl2_checksum(mode: int, counter: int, dat: bytearray) -> int:
   return 0xFF - (checksum & 0xFF)
 
 
-def create_lka_msg(packer, CAN: CanBus, active: bool = False, apply_angle: float = 0.0,
-                   direction: int = 0, ramp_type: int = 0, curvature: float = 0.0):
-  """
-  Creates a CAN message for the Ford LKA Command.
+LKA_MAX_ANGLE_DEG = 5.8      # LaRefAng_No_Req saturates at +-102.4 mrad
+LKA_MAX_ANGLE_MRAD = 102.3
 
-  On LKA-steering platforms, this command applies Lane Keeping Aid maneuvers through the PSCM.
+
+def create_transit_lka_msg(packer, CAN: CanBus, lat_active: bool = False, apply_angle_deg: float = 0.0,
+                           action: int = 0, ramp_type: int = 0):
+  """
+  Creates a CAN message for the Ford LKA Command on LKA_STEERING platforms (2022 Transit MK5).
+
+  On platforms whose PSCM ignores LCA/TJA this is the steering channel, so the frame carries
+  real signal values. It is a separate function from starpilot/car/ford/fordcan.py's
+  create_lka_msg, which is the frame every other Ford platform transmits.
+
+  `apply_angle_deg` is RELATIVE to the current wheel angle and saturates at +-5.8 deg.
+  `action` is LkaActvStats_D2_Req (2/4 standard, 1/6 increasing, 0 inactive);
+  `ramp_type` is LaRampType_B_Req (0 slow, 1 fast).
 
   Frequency is 33Hz.
   """
-
-  if active:
-    mrad = math.radians(max(-5.8, min(5.8, apply_angle))) * 1000.0
-    mrad = max(-102.4, min(102.3, mrad))
-    curvature = max(-0.01023, min(0.01023, curvature))
+  if lat_active:
+    clipped = max(-LKA_MAX_ANGLE_DEG, min(LKA_MAX_ANGLE_DEG, apply_angle_deg))
+    mrad = max(-LKA_MAX_ANGLE_MRAD, min(LKA_MAX_ANGLE_MRAD, math.radians(clipped) * 1000.0))
   else:
+    # LaRefAng_No_Req has a DBC offset of -102.4 mrad, so an empty payload does not decode
+    # to zero. Pack 0.0 explicitly so the inactive heartbeat tracks the current angle.
     mrad = 0.0
-    direction = 0
+    action = 0
     ramp_type = 0
-    curvature = 0.0
 
   values = {
     "LkaDrvOvrrd_D_Rq": 0,
-    "LkaActvStats_D2_Req": direction if active else 0,
+    "LkaActvStats_D2_Req": action,
     "LaRefAng_No_Req": mrad,
     "LaRampType_B_Req": ramp_type,
-    "LaCurvature_No_Calc": curvature,
+    "LaCurvature_No_Calc": 0,
     "LdwActvStats_D_Req": 0,
     "LdwActvIntns_D_Req": 3,
   }
