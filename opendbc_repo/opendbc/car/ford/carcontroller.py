@@ -186,6 +186,7 @@ class CarController(CarControllerBase):
       self.transit_lka = TransitLkaState(TransitLkaIntervention.STANDARD, TransitLkaRamp.SLOW)
       self.desired_angle_last = 0.0
       self.lka_active_last = False
+      self.apply_angle_last = 0.0
     self.accel = 0.0
     self.gas = 0.0
     self.brake_request = False
@@ -265,6 +266,10 @@ class CarController(CarControllerBase):
           action, ramp_type = self.transit_lka.update(apply_angle, actuators.steeringAngleDeg, demand_rate)
         else:
           self.transit_lka.reset()
+        # What create_transit_lka_msg below will actually put on the wire: the ±5.8 deg clip
+        # it applies internally is exactly what the first drive tunes, so actuatorsOutput
+        # must report the clipped relative request, not the raw pre-clip desire.
+        self.apply_angle_last = float(np.clip(apply_angle, -fordcan.LKA_MAX_ANGLE_DEG, fordcan.LKA_MAX_ANGLE_DEG)) if lka_active else 0.0
         self.desired_angle_last = actuators.steeringAngleDeg
         self.lka_active_last = lka_active
         can_sends.append(fordcan.create_transit_lka_msg(self.packer, self.CAN, lka_active, apply_angle, action, ramp_type))
@@ -369,7 +374,13 @@ class CarController(CarControllerBase):
     self.lead_distance_bars_last = hud_control.leadDistanceBars
 
     new_actuators = actuators.as_builder()
-    new_actuators.curvature = self.apply_curvature_last
+    if self.transit_lka is not None:
+      # Log-only (latcontrol_angle.py's use_steer_limited_by_safety is tesla/hyundai only,
+      # so nothing reads this back into control): the actually-commanded absolute angle,
+      # i.e. how much of the request the ±5.8 deg wire clip in create_transit_lka_msg ate.
+      new_actuators.steeringAngleDeg = self.apply_angle_last + CS.out.steeringAngleDeg
+    else:
+      new_actuators.curvature = self.apply_curvature_last
     new_actuators.accel = self.accel
     new_actuators.gas = self.gas
 

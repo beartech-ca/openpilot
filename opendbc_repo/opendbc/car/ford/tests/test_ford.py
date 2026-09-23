@@ -665,6 +665,35 @@ class TestTransitLkaSwitchesAreLive:
     assert set(before) <= {2, 4} and set(after) <= {1, 6}
 
 
+class TestTransitCarOutputReportsCommandedAngle:
+  """actuatorsOutput.steeringAngleDeg is log-only on this platform (latcontrol_angle.py's
+  use_steer_limited_by_safety is tesla/hyundai only), but it is what a first-drive review
+  reads to see how much of the request the wire's own +-5.8 deg clip ate."""
+
+  def test_reports_the_wire_clipped_angle_not_the_raw_desire(self):
+    car_interface, toggles = _transit_interface()
+    car_interface.CS.lkas_available = True
+    car_interface.CS.out.steeringAngleDeg = 0.0
+    CC = structs.CarControl()
+    CC.enabled = True
+    CC.latActive = True
+    CC.actuators.steeringAngleDeg = 20.0  # far past the +-5.8 deg wire clip
+    actuators, _can_sends = car_interface.apply(CC.as_reader(), 0, toggles)
+    assert math.isclose(actuators.steeringAngleDeg, 5.8, abs_tol=1e-6), \
+      f"expected the clipped 5.8 deg actually commanded, got {actuators.steeringAngleDeg}"
+
+  def test_reports_zero_offset_from_current_angle_when_inactive(self):
+    car_interface, toggles = _transit_interface()
+    car_interface.CS.lkas_available = True
+    car_interface.CS.out.steeringAngleDeg = 3.0
+    CC = structs.CarControl()
+    CC.enabled = False
+    CC.latActive = False
+    CC.actuators.steeringAngleDeg = 20.0
+    actuators, _can_sends = car_interface.apply(CC.as_reader(), 0, toggles)
+    assert math.isclose(actuators.steeringAngleDeg, 3.0, abs_tol=1e-6)
+
+
 class TestTransitLkaAvailability:
   """LaActAvail_D_Actl is not in get_can_parsers' pt list on this (non-CAN-FD) platform; CarState
   registers Lane_Assist_Data3_FD1 lazily on first cp.vl access, which _transit_interface's setup
