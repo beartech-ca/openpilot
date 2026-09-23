@@ -123,7 +123,7 @@
 |Ford|Mondeo 2014-22|Adaptive Cruise Control with Lane Centering|[Upstream](#upstream)|
 |Ford|Mustang Mach-E 2021-24|All|[Upstream](#upstream)|
 |Ford|Ranger 2024|Adaptive Cruise Control with Lane Centering|[Upstream](#upstream)|
-|Ford|Transit 2025|Co-Pilot360 Assist+|[Upstream](#upstream)|
+|Ford|Transit 2022|Lane Keeping Aid|[Upstream](#upstream)|
 |Genesis|G70 2018|All|[Upstream](#upstream)|
 |Genesis|G70 2019-21|All|[Upstream](#upstream)|
 |Genesis|G70 2022-23|All|[Upstream](#upstream)|
