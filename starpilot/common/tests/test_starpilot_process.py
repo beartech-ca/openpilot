@@ -165,3 +165,24 @@ def test_transition_onroad_stops_dashboard_analysis(monkeypatch, tmp_path):
 
   assert calls == ["stop"]
   assert not error_log.exists()
+
+
+def test_should_sync_drive_stats_false_when_athena_disabled():
+  # Parked, screen on, time valid: this is exactly the condition that beaconed to
+  # comma every DRIVE_STATS_SYNC_RATE seconds before this fork gated it.
+  assert starpilot_process.should_sync_drive_stats(
+    started=False, time_validated=True, screen_brightness_percent=50, athena_enabled=False
+  ) is False
+
+
+def test_should_sync_drive_stats_true_when_athena_enabled_and_conditions_met():
+  assert starpilot_process.should_sync_drive_stats(
+    started=False, time_validated=True, screen_brightness_percent=50, athena_enabled=True
+  ) is True
+
+
+def test_should_sync_drive_stats_respects_default_athena_enabled_constant():
+  # No athena_enabled override: reads the fork's ATHENA_ENABLED constant, which is False.
+  assert starpilot_process.should_sync_drive_stats(
+    started=False, time_validated=True, screen_brightness_percent=50
+  ) is False
