@@ -48,7 +48,7 @@ class CarState(CarStateBase):
     cp_cam = can_parsers[Bus.cam]
 
     if self.CP.carFingerprint in CUSW_CARS:
-      return self.update_cusw(cp, cp_cam)
+      return self.update_cusw(cp, cp_cam), custom.StarPilotCarState.new_message()
 
     ret = structs.CarState()
 

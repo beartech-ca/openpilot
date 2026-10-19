@@ -13,7 +13,7 @@ from cereal import custom
 from opendbc.car import DT_CTRL, apply_hysteresis, create_button_events, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness, STD_CARGO_KG
 from opendbc.car import structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
-from opendbc.car.chrysler.values import CAR as CHRYSLER, ChryslerStarPilotFlags
+from opendbc.car.chrysler.values import CAR as CHRYSLER, CUSW_CARS as CHRYSLER_CUSW_CARS, ChryslerStarPilotFlags
 from opendbc.car.common.basedir import BASEDIR
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.common.simple_kalman import KF1D, get_kalman_gain
@@ -220,7 +220,8 @@ class CarInterfaceBase(ABC):
 
     if platform not in MOCK:
       if platform in CHRYSLER:
-        if 0x4FF in fingerprint[0]:
+        # CUSW EPS faults below its minimum steering speed, so the no-min-speed mod never applies
+        if 0x4FF in fingerprint[0] and candidate not in CHRYSLER_CUSW_CARS:
           fp_ret.flags |= ChryslerStarPilotFlags.NO_MIN_STEERING_SPEED.value
           CP.minSteerSpeed = 0.
 
