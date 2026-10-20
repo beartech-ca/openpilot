@@ -114,9 +114,6 @@ Pipfile
 cereal/messaging/bridge
 selfdrive/pandad/pandad
 system/camerad/camerad
-system/hardware/tici/updater
-system/hardware/tici/updater_magic
-system/hardware/tici/updater_weston
 system/loggerd/bootlog
 system/loggerd/encoderd
 system/loggerd/loggerd
