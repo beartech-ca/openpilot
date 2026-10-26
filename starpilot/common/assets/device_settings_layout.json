@@ -3615,6 +3615,15 @@
         "settings_tier": "simple"
       },
       {
+        "key": "CUSWSteerSpeedAlert",
+        "label": "Always Alert Below Steer Speed",
+        "description": "Jeep Cherokee (CUSW) only. Alert every time speed drops below the minimum steering speed (about 41 mph), as stock openpilot does. Turn off to use StarPilot's once-per-drive alert.",
+        "picker_description": "Alerts every time a Cherokee drops below its minimum steering speed.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
         "key": "SubaruSNG",
         "label": "Stop and Go",
         "description": "Stop and go for supported Subaru vehicles.",

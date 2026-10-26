@@ -15,7 +15,7 @@ import numpy as np
 from cereal import car, custom, log
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.car_helpers import interfaces
-from opendbc.car.chrysler.values import JEEPS as CHRYSLER_JEEPS
+from opendbc.car.chrysler.values import CUSW_CARS as CHRYSLER_CUSW_CARS, JEEPS as CHRYSLER_JEEPS
 from opendbc.car.gm.values import CAR as GM_CAR, EV_CAR as GM_EV_CAR, GM_AUTO_HOLD_CARS, GMFlags
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR, EV_CAR as HYUNDAI_EV_CAR, HyundaiFlags, HyundaiStarPilotSafetyFlags
 from opendbc.car.interfaces import TORQUE_SUBSTITUTE_PATH, CarInterfaceBase, GearShifter
@@ -1619,6 +1619,10 @@ class StarPilotVariables:
     toggle.jeep_brake_hold = self.get_value(
       "JeepBrakeHold",
       condition=toggle.car_make == "chrysler" and toggle.car_model in CHRYSLER_JEEPS,
+    )
+    toggle.cusw_steer_speed_alert = self.get_value(
+      "CUSWSteerSpeedAlert",
+      condition=toggle.car_make == "chrysler" and toggle.car_model in CHRYSLER_CUSW_CARS,
     )
 
     toggle.tesla_cooperative_steering = self.get_value(

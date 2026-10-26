@@ -801,6 +801,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"VeryLongStarButtonControl", {PERSISTENT, INT, "0", "0", 2, SETTINGS_SIMPLE}},
     {"VoltSNG", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"JeepBrakeHold", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
+    {"CUSWSteerSpeedAlert", {PERSISTENT, BOOL, "1", "1", 2, SETTINGS_SIMPLE}},
     {"GMAutoHold", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"VoltOnePedalMode", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"ToyotaAutoHold", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},

@@ -369,6 +369,13 @@ class VehicleSettingsManagerView(PanelManagerView):
         "get_state": lambda: self._controller._params.get_bool("JeepBrakeHold"),
         "set_state": lambda s: self._controller._on_toggle("JeepBrakeHold"),
       })
+    if cs.isCUSW:
+      toggles.append({
+        "title": tr("Always Alert Below Steer Speed"),
+        "subtitle": tr("Alert every time speed drops below the minimum steering speed (about 41 mph). Off uses StarPilot's once-per-drive alert."),
+        "get_state": lambda: self._controller._params.get_bool("CUSWSteerSpeedAlert"),
+        "set_state": lambda s: self._controller._on_toggle("CUSWSteerSpeedAlert"),
+      })
 
     if cs.isSubaru:
       toggles.append({

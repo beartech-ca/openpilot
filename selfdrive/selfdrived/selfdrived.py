@@ -482,36 +482,39 @@ class SelfdriveD:
     if CS.canValid:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
 
-      # Once-per-drive latch for belowSteerSpeed — match old MinSteerSpeedBanner 1:1.
-      min_steer_speed = float(self.CP.minSteerSpeed)
-      under_min = min_steer_speed > 0.0 and float(CS.vEgo) < min_steer_speed
+      # CUSW stops steering below ~41 mph at highway speeds, so by default keep the brand's
+      # continuous belowSteerSpeed alert (stock openpilot behavior) instead of the latch below.
+      if not getattr(self.starpilot_toggles, "cusw_steer_speed_alert", False):
+        # Once-per-drive latch for belowSteerSpeed — match old MinSteerSpeedBanner 1:1.
+        min_steer_speed = float(self.CP.minSteerSpeed)
+        under_min = min_steer_speed > 0.0 and float(CS.vEgo) < min_steer_speed
 
-      if not under_min:
-        self.below_steer_has_been_above_min = True
+        if not under_min:
+          self.below_steer_has_been_above_min = True
 
-      was_under_min_prev = min_steer_speed > 0.0 and float(self.CS_prev.vEgo) < min_steer_speed
-      crossed_below = under_min and not was_under_min_prev
-      if (not self.below_steer_shown_this_drive) and crossed_below and self.below_steer_has_been_above_min:
-        self.below_steer_shown_this_drive = True
-        self.below_steer_showing = True
+        was_under_min_prev = min_steer_speed > 0.0 and float(self.CS_prev.vEgo) < min_steer_speed
+        crossed_below = under_min and not was_under_min_prev
+        if (not self.below_steer_shown_this_drive) and crossed_below and self.below_steer_has_been_above_min:
+          self.below_steer_shown_this_drive = True
+          self.below_steer_showing = True
 
-      if self.below_steer_showing and not under_min:
-        self.below_steer_showing = False
+        if self.below_steer_showing and not under_min:
+          self.below_steer_showing = False
 
-      # Fully own the event — strip brand emissions, inject our own while active.
-      car_events = [e for e in car_events if e.name.raw != EventName.belowSteerSpeed]
-      show_alert = self.below_steer_showing and under_min
+        # Fully own the event — strip brand emissions, inject our own while active.
+        car_events = [e for e in car_events if e.name.raw != EventName.belowSteerSpeed]
+        show_alert = self.below_steer_showing and under_min
 
-      # Switchback cooldown: rate-limits the alert when car sits below min.
-      if show_alert and switchback_mode_enabled and switchback_mode_cooldown > 0.0:
-        now = time.monotonic()
-        if (now - self.last_below_steer_speed_alert_time) < switchback_mode_cooldown:
-          show_alert = False
-        else:
-          self.last_below_steer_speed_alert_time = now
+        # Switchback cooldown: rate-limits the alert when car sits below min.
+        if show_alert and switchback_mode_enabled and switchback_mode_cooldown > 0.0:
+          now = time.monotonic()
+          if (now - self.last_below_steer_speed_alert_time) < switchback_mode_cooldown:
+            show_alert = False
+          else:
+            self.last_below_steer_speed_alert_time = now
 
-      if show_alert:
-        self.events.add(EventName.belowSteerSpeed)
+        if show_alert:
+          self.events.add(EventName.belowSteerSpeed)
 
       self.events.add_from_msg(car_events)
 
